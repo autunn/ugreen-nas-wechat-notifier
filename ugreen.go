@@ -26,7 +26,7 @@ type UGreenAuthInfo struct {
 	TokenID   string `json:"token_id"`
 	Token     string `json:"token"`
 	PublicKey string `json:"public_key"`
-	CookieStr string `json:"cookie_str"` // 核心修复：必须保存并传递登录态 Cookie
+	CookieStr string `json:"cookie_str"`
 }
 
 type UGreenNotice struct {
@@ -312,27 +312,35 @@ func PushUGreenPsStatus() {
 		return
 	}
 
+	type ProcessItem struct {
+		Name    string `json:"name"`
+		Consume struct {
+			CPU    float64 `json:"cpu_used_percent"`
+			Memory float64 `json:"mem_used_percent"`
+		} `json:"consume"`
+	}
+
 	var resp struct {
+		Services struct {
+			List []ProcessItem `json:"list"`
+		} `json:"services"`
 		Processes struct {
-			List []struct {
-				Name    string `json:"name"`
-				Consume struct {
-					CPU    float64 `json:"cpu_used_percent"`
-					Memory float64 `json:"mem_used_percent"`
-				} `json:"consume"`
-			} `json:"list"`
+			List []ProcessItem `json:"list"`
 		} `json:"processes"`
 	}
 	json.Unmarshal(raw, &resp)
 
-	sort.Slice(resp.Processes.List, func(i, j int) bool {
-		return resp.Processes.List[i].Consume.CPU > resp.Processes.List[j].Consume.CPU
+	// 源码对齐：合并 Services 和 Processes 以确保完整获取数据
+	allProcs := append(resp.Services.List, resp.Processes.List...)
+
+	sort.Slice(allProcs, func(i, j int) bool {
+		return allProcs[i].Consume.CPU > allProcs[j].Consume.CPU
 	})
 
 	var builder strings.Builder
 	builder.WriteString("📈 系统进程占用 (TOP 5)\n")
 	builder.WriteString(strings.Repeat("-", 22) + "\n")
-	for i, p := range resp.Processes.List {
+	for i, p := range allProcs {
 		if i >= 5 {
 			break
 		}
@@ -424,21 +432,7 @@ func PushUGreenPowerStatus() {
 		HardDriveTime int    `json:"hard_drive_time"`
 		HardDriveUnit string `json:"hard_drive_unit"`
 	}
-
-	if err := json.Unmarshal(raw, &cfgData); err != nil {
-		// 容错兜底：如果服务器强行多包裹了一层 data
-		var wrapped struct {
-			Data struct {
-				PowerBoot     bool   `json:"power_boot"`
-				WakeOn        bool   `json:"wake_on"`
-				HardDriveFlag bool   `json:"hard_drive_flag"`
-				HardDriveTime int    `json:"hard_drive_time"`
-				HardDriveUnit string `json:"hard_drive_unit"`
-			} `json:"data"`
-		}
-		json.Unmarshal(raw, &wrapped)
-		cfgData = wrapped.Data
-	}
+	json.Unmarshal(raw, &cfgData)
 
 	var builder strings.Builder
 	builder.WriteString("⚡ 电源与休眠配置\n")
@@ -519,21 +513,19 @@ func HandleUGreenPerfCommand(command string) {
 	}
 }
 
-// requestUGreenDeepAPI 绿联深层加密 API 请求器 (支持 GET/POST 动态加密与 Cookie 携带)
+// requestUGreenDeepAPI 源码对齐版：精准处理 3 种密文剥离逻辑，URL安全编码，全局Cookie映射
 func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL bool, method string, apiPath string, params map[string]string, body map[string]interface{}) ([]byte, error) {
 	protocol := "http"
 	if useSSL {
 		protocol = "https"
 	}
 
-	// 源码对齐：生成安全的 16 字节(32 字符)随机 AES 密钥
 	b := make([]byte, 16)
 	rand.Read(b)
 	aesKey := hex.EncodeToString(b)
 
 	urlStr := fmt.Sprintf("%s://%s:%d%s", protocol, ip, port, apiPath)
 
-	// 源码对齐：GET 参数必须用 url.Values 编码并 QueryEscape，防止密文的 + 号丢失
 	if len(params) > 0 {
 		q := url.Values{}
 		for k, v := range params {
@@ -578,8 +570,52 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 	defer resp.Body.Close()
 
 	raw, _ := io.ReadAll(resp.Body)
+	rawStr := string(raw)
 
-	// 源码对齐：解析并【剥离】外层 Code 包装，只返回真实的 Data
+	// Attempt 1: 裸密文直接解密 (源码对齐)
+	decrypted, err := AESGCMDecrypt(aesKey, rawStr)
+	if err == nil {
+		var apiResp struct {
+			Code int             `json:"code"`
+			Msg  string          `json:"msg"`
+			Data json.RawMessage `json:"data"`
+		}
+		if jsonErr := json.Unmarshal([]byte(decrypted), &apiResp); jsonErr == nil {
+			if apiResp.Code != 200 && apiResp.Code != 0 {
+				return nil, fmt.Errorf("api error: %v, %s", apiResp.Code, apiResp.Msg)
+			}
+			if len(apiResp.Data) > 0 {
+				return apiResp.Data, nil
+			}
+		}
+		return []byte(decrypted), nil
+	}
+
+	// Attempt 2: 外层包装 {"encrypt_resp_body": "..."} (源码对齐)
+	var encResp struct {
+		EncryptRespBody string `json:"encrypt_resp_body"`
+	}
+	if json.Unmarshal(raw, &encResp) == nil && encResp.EncryptRespBody != "" {
+		dec, decErr := AESGCMDecrypt(aesKey, encResp.EncryptRespBody)
+		if decErr == nil {
+			var apiResp struct {
+				Code int             `json:"code"`
+				Msg  string          `json:"msg"`
+				Data json.RawMessage `json:"data"`
+			}
+			if jsonErr := json.Unmarshal([]byte(dec), &apiResp); jsonErr == nil {
+				if apiResp.Code != 200 && apiResp.Code != 0 {
+					return nil, fmt.Errorf("api error: %v, %s", apiResp.Code, apiResp.Msg)
+				}
+				if len(apiResp.Data) > 0 {
+					return apiResp.Data, nil
+				}
+			}
+			return []byte(dec), nil
+		}
+	}
+
+	// Attempt 3: 标准 JSON 外壳包装内层密文 {"code":200, "data": {...}} (源码对齐)
 	var apiResp struct {
 		Code int             `json:"code"`
 		Msg  string          `json:"msg"`
@@ -587,35 +623,23 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 	}
 	if err := json.Unmarshal(raw, &apiResp); err == nil {
 		if apiResp.Code != 200 && apiResp.Code != 0 {
-			return nil, fmt.Errorf("返回错误码: %v, %s", apiResp.Code, apiResp.Msg)
+			return nil, fmt.Errorf("api error: %v, %s", apiResp.Code, apiResp.Msg)
 		}
-
 		var dataFields struct {
 			EncryptRespBody string `json:"encrypt_resp_body"`
 		}
-		// 如果内部依然包裹着密文
 		if json.Unmarshal(apiResp.Data, &dataFields) == nil && dataFields.EncryptRespBody != "" {
 			dec, decErr := AESGCMDecrypt(aesKey, dataFields.EncryptRespBody)
 			if decErr == nil {
 				return []byte(dec), nil
 			}
 		}
-		// 返回解包后的纯净数据
 		if len(apiResp.Data) > 0 {
 			return apiResp.Data, nil
 		}
 	}
 
-	// 兼容全量加密的兜底
-	var encResp struct {
-		EncryptRespBody string `json:"encrypt_resp_body"`
-	}
-	if json.Unmarshal(raw, &encResp) == nil && encResp.EncryptRespBody != "" {
-		dec, _ := AESGCMDecrypt(aesKey, encResp.EncryptRespBody)
-		return []byte(dec), nil
-	}
-
-	return raw, nil
+	return nil, fmt.Errorf("failed to parse response")
 }
 
 // ==================== 内部辅助请求与解析逻辑 ====================
@@ -629,6 +653,7 @@ func ensureAuth(username, password, ip string, port int, useSSL bool) *UGreenAut
 	return newAuth
 }
 
+// loginUGreen 源码对齐版：修复 Admin 不加密，修复 /ugreen/ Cookie作用域，兼容 x-rsa-token 为空情况
 func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenAuthInfo, error) {
 	protocol := "http"
 	if useSSL {
@@ -641,31 +666,35 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 	}
 
-	checkURL := fmt.Sprintf("%s://%s:%d/ugreen/v1/verify/check?token=", protocol, ip, port)
-	checkReqBody, _ := json.Marshal(map[string]string{"username": username})
-	req, _ := http.NewRequest("POST", checkURL, bytes.NewBuffer(checkReqBody))
-	req.Header.Set("Content-Type", "application/json")
+	encPassword := password
+	// 如果是 admin，源码中不加密直接传；否则需要拿一次 RSA 临时密钥加密。
+	if username != "admin" {
+		checkURL := fmt.Sprintf("%s://%s:%d/ugreen/v1/verify/check", protocol, ip, port)
+		checkReqBody, _ := json.Marshal(map[string]string{"username": username})
+		req, _ := http.NewRequest("POST", checkURL, bytes.NewBuffer(checkReqBody))
+		req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	pemBytes, err := base64.StdEncoding.DecodeString(resp.Header.Get("X-Rsa-Token"))
-	if err != nil {
-		return nil, err
-	}
-
-	encPassword, err := RsaEncrypt(string(pemBytes), password)
-	if err != nil {
-		return nil, err
+		if resp, err := client.Do(req); err == nil {
+			rsaToken := resp.Header.Get("x-rsa-token")
+			resp.Body.Close()
+			if rsaToken != "" {
+				if pemBytes, err := base64.StdEncoding.DecodeString(rsaToken); err == nil {
+					if enc, err := RsaEncrypt(string(pemBytes), password); err == nil {
+						encPassword = enc
+					}
+				}
+			}
+		}
 	}
 
 	loginURL := fmt.Sprintf("%s://%s:%d/ugreen/v1/verify/login", protocol, ip, port)
-	loginPayload := map[string]interface{}{"username": username, "password": encPassword, "keepalive": true, "is_simple": true}
+	loginPayload := map[string]interface{}{"username": username, "password": encPassword, "keepalive": true, "is_simple": true, "otp": false}
 	loginReqBody, _ := json.Marshal(loginPayload)
 	req2, _ := http.NewRequest("POST", loginURL, bytes.NewBuffer(loginReqBody))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Client-Id", "cli-go-tool")
+	req2.Header.Set("Client-Version", "77682")
+	req2.Header.Set("UG-Agent", "PC/WEB")
 	req2.Header.Set("x-specify-language", "zh-CN")
 
 	resp2, err := client.Do(req2)
@@ -676,11 +705,17 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 
 	body2, _ := io.ReadAll(resp2.Body)
 	var loginResp UGreenLoginResp
-	json.Unmarshal(body2, &loginResp)
+	if err := json.Unmarshal(body2, &loginResp); err != nil {
+		return nil, err
+	}
+	if loginResp.Code != 200 {
+		return nil, fmt.Errorf("login failed: code %d", loginResp.Code)
+	}
 
 	pubKeyBytes, _ := base64.StdEncoding.DecodeString(loginResp.Data.PublicKey)
 
-	u, _ := url.Parse(fmt.Sprintf("%s://%s:%d", protocol, ip, port))
+	// 源码对齐：Cookie 的 Domain 作用域必须明确带上 /ugreen/ 路径
+	u, _ := url.Parse(fmt.Sprintf("%s://%s:%d/ugreen/", protocol, ip, port))
 	var cookiePairs []string
 	for _, c := range jar.Cookies(u) {
 		cookiePairs = append(cookiePairs, c.Name+"="+c.Value)
