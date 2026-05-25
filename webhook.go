@@ -154,7 +154,7 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 			case "GET_UGREEN_STORAGE":
 				go PushUGreenStorageStatus()
 			case "GET_UGREEN_UPS":
-				go PushUGreenFeatureStatus("UPS电源") // 此处仍保留占位，按你的需求暂未涉及UPS控制
+				go WechatPush("🚧 [UPS电源] 功能暂未接入。")
 
 			// 🛠️ 服务类
 			case "GET_UGREEN_DOCKER":
