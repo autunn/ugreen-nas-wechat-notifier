@@ -374,6 +374,17 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 			continue
 		}
 
+		// --- 新增：尝试剥离绿联 API 可能存在的外层 {"data": {...}} 或 {"result": {...}} ---
+		var wrapper map[string]json.RawMessage
+		if json.Unmarshal(dataRaw, &wrapper) == nil {
+			if data, ok := wrapper["data"]; ok && len(data) > 0 {
+				dataRaw = data
+			} else if result, ok := wrapper["result"]; ok && len(result) > 0 {
+				dataRaw = result
+			}
+		}
+		// -------------------------------------------------------------------
+
 		var raw map[string]interface{}
 		if json.Unmarshal(dataRaw, &raw) != nil {
 			continue
