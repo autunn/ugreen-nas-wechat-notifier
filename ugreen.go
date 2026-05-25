@@ -238,6 +238,236 @@ func PushUGreenNotifyStatus() {
 	}
 }
 
+// PushUGreenDockerStatus 菜单触发：Docker 状态
+func PushUGreenDockerStatus() {
+	if len(Config.UGreen) == 0 {
+		return
+	}
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+	if authInfo == nil {
+		return
+	}
+
+	ovRaw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/docker/view/ObtainOverviewInfo", nil, nil)
+	if err != nil {
+		WechatPush("⚠️ 获取 Docker 状态失败: " + err.Error())
+		return
+	}
+	var overview struct {
+		RunContainerCount int `json:"runContainerCount"`
+		ContainerCount    int `json:"containerCount"`
+		ImageCount        int `json:"imageCount"`
+		CpuUsed           int `json:"cpuUsed"`
+	}
+	json.Unmarshal(ovRaw, &overview)
+
+	listRaw, _ := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "POST", "/ugreen/v1/docker/container/ContainerListV2", nil, map[string]interface{}{"pageNum": 1, "pageSize": 200})
+	var list struct {
+		Result []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"result"`
+	}
+	json.Unmarshal(listRaw, &list)
+
+	var builder strings.Builder
+	builder.WriteString("🐳 Docker 运行概览\n")
+	builder.WriteString(strings.Repeat("-", 22) + "\n")
+	builder.WriteString(fmt.Sprintf("运行中容器: %d / %d\n", overview.RunContainerCount, overview.ContainerCount))
+	builder.WriteString(fmt.Sprintf("本地镜像数: %d\n", overview.ImageCount))
+	builder.WriteString(fmt.Sprintf("整体CPU负载: %d%%\n\n", overview.CpuUsed))
+
+	builder.WriteString("🟢 运行中的容器:\n")
+	count := 0
+	for _, c := range list.Result {
+		if c.Status == "running" || c.Status == "Up" {
+			builder.WriteString(fmt.Sprintf("▪️ %s\n", c.Name))
+			count++
+		}
+	}
+	if count == 0 {
+		builder.WriteString("当前无运行中容器\n")
+	}
+
+	WechatPush(strings.TrimSpace(builder.String()))
+}
+
+// PushUGreenPsStatus 菜单触发：进程列表
+func PushUGreenPsStatus() {
+	if len(Config.UGreen) == 0 {
+		return
+	}
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+	if authInfo == nil {
+		return
+	}
+
+	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/taskmgr/services/processes", nil, nil)
+	if err != nil {
+		WechatPush("⚠️ 获取进程列表失败: " + err.Error())
+		return
+	}
+
+	var resp struct {
+		Processes struct {
+			List []struct {
+				Name    string `json:"name"`
+				Consume struct {
+					CPU    float64 `json:"cpu_used_percent"`
+					Memory float64 `json:"mem_used_percent"`
+				} `json:"consume"`
+			} `json:"list"`
+		} `json:"processes"`
+	}
+	json.Unmarshal(raw, &resp)
+
+	sort.Slice(resp.Processes.List, func(i, j int) bool {
+		return resp.Processes.List[i].Consume.CPU > resp.Processes.List[j].Consume.CPU
+	})
+
+	var builder strings.Builder
+	builder.WriteString("📈 系统进程占用 (TOP 5)\n")
+	builder.WriteString(strings.Repeat("-", 22) + "\n")
+	for i, p := range resp.Processes.List {
+		if i >= 5 {
+			break
+		}
+		builder.WriteString(fmt.Sprintf("%d. %s\n   CPU: %.1f%% | 内存: %.1f%%\n", i+1, p.Name, p.Consume.CPU, p.Consume.Memory))
+	}
+
+	WechatPush(strings.TrimSpace(builder.String()))
+}
+
+// PushUGreenBackupStatus 菜单触发：备份任务
+func PushUGreenBackupStatus() {
+	if len(Config.UGreen) == 0 {
+		return
+	}
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+	if authInfo == nil {
+		return
+	}
+
+	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v2/web/syncbackup/task/list", map[string]string{"backup_type": "backup", "page": "1", "size": "100"}, nil)
+	if err != nil {
+		WechatPush("⚠️ 获取备份任务失败: " + err.Error())
+		return
+	}
+
+	var result struct {
+		List []struct {
+			TaskName     string `json:"task_name"`
+			Status       int    `json:"status"`
+			LastSyncTime int64  `json:"last_sync_time"`
+		} `json:"list"`
+	}
+	json.Unmarshal(raw, &result)
+
+	var builder strings.Builder
+	builder.WriteString("🔄 备份任务状态\n")
+	builder.WriteString(strings.Repeat("-", 22) + "\n")
+	if len(result.List) == 0 {
+		builder.WriteString("当前没有配置备份任务\n")
+	} else {
+		for _, t := range result.List {
+			statusStr := "未知"
+			switch t.Status {
+			case 0:
+				statusStr = "已停止 ⏸️"
+			case 1:
+				statusStr = "正常 ✅"
+			case 2:
+				statusStr = "运行中 🔄"
+			case 3:
+				statusStr = "已暂停 ⏸️"
+			case 4:
+				statusStr = "错误 ❌"
+			}
+			lastSync := "从未运行"
+			if t.LastSyncTime > 0 {
+				lastSync = time.Unix(t.LastSyncTime, 0).Format("2006-01-02 15:04")
+			}
+			builder.WriteString(fmt.Sprintf("📁 %s\n   状态: %s\n   最后同步: %s\n\n", t.TaskName, statusStr, lastSync))
+		}
+	}
+	WechatPush(strings.TrimSpace(builder.String()))
+}
+
+// PushUGreenPowerStatus 菜单触发：电源配置
+func PushUGreenPowerStatus() {
+	if len(Config.UGreen) == 0 {
+		return
+	}
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+	if authInfo == nil {
+		return
+	}
+
+	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/hardware/power/config", nil, nil)
+	if err != nil {
+		WechatPush("⚠️ 获取电源配置失败: " + err.Error())
+		return
+	}
+
+	var cfgData struct {
+		PowerBoot     bool   `json:"power_boot"`
+		WakeOn        bool   `json:"wake_on"`
+		HardDriveFlag bool   `json:"hard_drive_flag"`
+		HardDriveTime int    `json:"hard_drive_time"`
+		HardDriveUnit string `json:"hard_drive_unit"`
+	}
+
+	if err := json.Unmarshal(raw, &cfgData); err != nil {
+		// 容错兜底：如果服务器强行多包裹了一层 data
+		var wrapped struct {
+			Data struct {
+				PowerBoot     bool   `json:"power_boot"`
+				WakeOn        bool   `json:"wake_on"`
+				HardDriveFlag bool   `json:"hard_drive_flag"`
+				HardDriveTime int    `json:"hard_drive_time"`
+				HardDriveUnit string `json:"hard_drive_unit"`
+			} `json:"data"`
+		}
+		json.Unmarshal(raw, &wrapped)
+		cfgData = wrapped.Data
+	}
+
+	var builder strings.Builder
+	builder.WriteString("⚡ 电源与休眠配置\n")
+	builder.WriteString(strings.Repeat("-", 22) + "\n")
+
+	statusMap := func(b bool) string {
+		if b {
+			return "已开启 ✅"
+		}
+		return "已关闭 ❌"
+	}
+
+	unitMap := func(u string) string {
+		if u == "H" {
+			return "小时"
+		}
+		return "分钟"
+	}
+
+	builder.WriteString(fmt.Sprintf("来电自启: %s\n", statusMap(cfgData.PowerBoot)))
+	builder.WriteString(fmt.Sprintf("网络唤醒(WOL): %s\n", statusMap(cfgData.WakeOn)))
+	builder.WriteString(fmt.Sprintf("内置硬盘休眠: %s\n", statusMap(cfgData.HardDriveFlag)))
+	if cfgData.HardDriveFlag {
+		builder.WriteString(fmt.Sprintf("休眠等待时间: %d %s\n", cfgData.HardDriveTime, unitMap(cfgData.HardDriveUnit)))
+	}
+
+	WechatPush(strings.TrimSpace(builder.String()))
+}
+
 // ==================== 深层加密 API 与性能控制 ====================
 
 // HandleUGreenPerfCommand 解析并执行微信发来的性能控制文本指令
@@ -296,25 +526,23 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 		protocol = "https"
 	}
 
-	// 生成安全的 16 字节(32 字符)随机 AES 密钥
+	// 源码对齐：生成安全的 16 字节(32 字符)随机 AES 密钥
 	b := make([]byte, 16)
 	rand.Read(b)
 	aesKey := hex.EncodeToString(b)
 
 	urlStr := fmt.Sprintf("%s://%s:%d%s", protocol, ip, port, apiPath)
 
-	// 1. 处理 GET 加密参数 (核心修复：必须 url.QueryEscape，否则 Base64 的加号会丢失)
+	// 源码对齐：GET 参数必须用 url.Values 编码并 QueryEscape，防止密文的 + 号丢失
 	if len(params) > 0 {
-		var query []string
+		q := url.Values{}
 		for k, v := range params {
-			query = append(query, fmt.Sprintf("%s=%s", k, v))
+			q.Set(k, v)
 		}
-		rawQuery := strings.Join(query, "&")
-		encQuery, _ := AESGCMEncrypt(aesKey, rawQuery)
+		encQuery, _ := AESGCMEncrypt(aesKey, q.Encode())
 		urlStr += "?encrypt_query=" + url.QueryEscape(encQuery)
 	}
 
-	// 2. 处理 POST 加密请求体
 	var bodyReader io.Reader
 	if body != nil {
 		bodyJSON, _ := json.Marshal(body)
@@ -326,20 +554,18 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 
 	req, _ := http.NewRequest(method, urlStr, bodyReader)
 
-	// 3. 头部权限与密钥装载
 	securityCode, _ := RsaEncrypt(authInfo.PublicKey, aesKey)
 	ugreenToken, _ := RsaEncrypt(authInfo.PublicKey, authInfo.Token)
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Client-Id", "cli-go-tool")
-	req.Header.Set("Client-Version", "77682") // 对齐参考源码
+	req.Header.Set("Client-Version", "77682")
 	req.Header.Set("UG-Agent", "PC/WEB")
 	req.Header.Set("X-Specify-Language", "zh-CN")
 	req.Header.Set("X-Ugreen-Security-Code", securityCode)
 	req.Header.Set("X-Ugreen-Security-Key", MD5Hex(authInfo.Token))
 	req.Header.Set("X-Ugreen-Token", ugreenToken)
 
-	// 核心修复：携带 Cookie
 	if authInfo.CookieStr != "" {
 		req.Header.Set("Cookie", authInfo.CookieStr)
 	}
@@ -353,23 +579,42 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 
 	raw, _ := io.ReadAll(resp.Body)
 
-	// 4. 解析并解密响应体
-	var result map[string]interface{}
-	if err := json.Unmarshal(raw, &result); err == nil {
-		if code, ok := result["code"].(float64); ok && code != 200 && code != 0 {
-			msg := "未知错误"
-			if m, ok := result["msg"].(string); ok {
-				msg = m
-			}
-			return nil, fmt.Errorf("返回错误码: %v, %s", code, msg)
+	// 源码对齐：解析并【剥离】外层 Code 包装，只返回真实的 Data
+	var apiResp struct {
+		Code int             `json:"code"`
+		Msg  string          `json:"msg"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &apiResp); err == nil {
+		if apiResp.Code != 200 && apiResp.Code != 0 {
+			return nil, fmt.Errorf("返回错误码: %v, %s", apiResp.Code, apiResp.Msg)
 		}
-		if dataMap, ok := result["data"].(map[string]interface{}); ok {
-			if encResp, ok := dataMap["encrypt_resp_body"].(string); ok {
-				dec, _ := AESGCMDecrypt(aesKey, encResp)
+
+		var dataFields struct {
+			EncryptRespBody string `json:"encrypt_resp_body"`
+		}
+		// 如果内部依然包裹着密文
+		if json.Unmarshal(apiResp.Data, &dataFields) == nil && dataFields.EncryptRespBody != "" {
+			dec, decErr := AESGCMDecrypt(aesKey, dataFields.EncryptRespBody)
+			if decErr == nil {
 				return []byte(dec), nil
 			}
 		}
+		// 返回解包后的纯净数据
+		if len(apiResp.Data) > 0 {
+			return apiResp.Data, nil
+		}
 	}
+
+	// 兼容全量加密的兜底
+	var encResp struct {
+		EncryptRespBody string `json:"encrypt_resp_body"`
+	}
+	if json.Unmarshal(raw, &encResp) == nil && encResp.EncryptRespBody != "" {
+		dec, _ := AESGCMDecrypt(aesKey, encResp.EncryptRespBody)
+		return []byte(dec), nil
+	}
+
 	return raw, nil
 }
 
@@ -377,7 +622,6 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 
 func ensureAuth(username, password, ip string, port int, useSSL bool) *UGreenAuthInfo {
 	authInfo := loadUGreenAuthInfo(ip, port)
-	// 核心修复：如果旧缓存文件缺少 PublicKey 或 Cookie，强制重新登录获取，免除用户手动清理缓存的烦恼
 	if authInfo != nil && authInfo.PublicKey != "" && authInfo.CookieStr != "" {
 		return authInfo
 	}
@@ -391,7 +635,6 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 		protocol = "https"
 	}
 
-	// 核心修复：使用 CookieJar 收集完整的登录态 Cookie
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{
 		Jar:       jar,
@@ -437,7 +680,6 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 
 	pubKeyBytes, _ := base64.StdEncoding.DecodeString(loginResp.Data.PublicKey)
 
-	// 提取并序列化 Cookies 备用
 	u, _ := url.Parse(fmt.Sprintf("%s://%s:%d", protocol, ip, port))
 	var cookiePairs []string
 	for _, c := range jar.Cookies(u) {
@@ -747,225 +989,4 @@ func buildUGreenSystemStatusPushContent(info *UGreenSystemInfo, typeName string)
 	builder.WriteString(fmt.Sprintf("🧠 内存: %.1f%% (%.1fG/%.1fG)\n", info.UsageMemory, memUsedGB, memTotalGB))
 	builder.WriteString(fmt.Sprintf("🚀 下载: %s | 📤 上传: %s\n", info.NetworkReceive, info.NetworkTransmit))
 	return builder.String()
-}
-
-// PushUGreenDockerStatus 菜单触发：Docker 状态
-func PushUGreenDockerStatus() {
-	if len(Config.UGreen) == 0 {
-		return
-	}
-	config := Config.UGreen[0]
-	ip, port := SplitIpPort(config.IpPort, 9999)
-	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
-	if authInfo == nil {
-		return
-	}
-
-	ovRaw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/docker/view/ObtainOverviewInfo", nil, nil)
-	if err != nil {
-		WechatPush("⚠️ 获取 Docker 状态失败: " + err.Error())
-		return
-	}
-	var overview struct {
-		RunContainerCount int `json:"runContainerCount"`
-		ContainerCount    int `json:"containerCount"`
-		ImageCount        int `json:"imageCount"`
-		CpuUsed           int `json:"cpuUsed"`
-	}
-	json.Unmarshal(ovRaw, &overview)
-
-	listRaw, _ := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "POST", "/ugreen/v1/docker/container/ContainerListV2", nil, map[string]interface{}{"pageNum": 1, "pageSize": 200})
-	var list struct {
-		Result []struct {
-			Name   string `json:"name"`
-			Status string `json:"status"`
-		} `json:"result"`
-	}
-	json.Unmarshal(listRaw, &list)
-
-	var builder strings.Builder
-	builder.WriteString("🐳 Docker 运行概览\n")
-	builder.WriteString(strings.Repeat("-", 22) + "\n")
-	builder.WriteString(fmt.Sprintf("运行中容器: %d / %d\n", overview.RunContainerCount, overview.ContainerCount))
-	builder.WriteString(fmt.Sprintf("本地镜像数: %d\n", overview.ImageCount))
-	builder.WriteString(fmt.Sprintf("整体CPU负载: %d%%\n\n", overview.CpuUsed))
-
-	builder.WriteString("🟢 运行中的容器:\n")
-	count := 0
-	for _, c := range list.Result {
-		if c.Status == "running" || c.Status == "Up" {
-			builder.WriteString(fmt.Sprintf("▪️ %s\n", c.Name))
-			count++
-		}
-	}
-	if count == 0 {
-		builder.WriteString("当前无运行中容器\n")
-	}
-
-	WechatPush(strings.TrimSpace(builder.String()))
-}
-
-// PushUGreenPsStatus 菜单触发：进程列表
-func PushUGreenPsStatus() {
-	if len(Config.UGreen) == 0 {
-		return
-	}
-	config := Config.UGreen[0]
-	ip, port := SplitIpPort(config.IpPort, 9999)
-	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
-	if authInfo == nil {
-		return
-	}
-
-	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/taskmgr/services/processes", nil, nil)
-	if err != nil {
-		WechatPush("⚠️ 获取进程列表失败: " + err.Error())
-		return
-	}
-
-	var resp struct {
-		Processes struct {
-			List []struct {
-				Name    string `json:"name"`
-				Consume struct {
-					CPU    float64 `json:"cpu_used_percent"`
-					Memory float64 `json:"mem_used_percent"`
-				} `json:"consume"`
-			} `json:"list"`
-		} `json:"processes"`
-	}
-	json.Unmarshal(raw, &resp)
-
-	sort.Slice(resp.Processes.List, func(i, j int) bool {
-		return resp.Processes.List[i].Consume.CPU > resp.Processes.List[j].Consume.CPU
-	})
-
-	var builder strings.Builder
-	builder.WriteString("📈 系统进程占用 (TOP 5)\n")
-	builder.WriteString(strings.Repeat("-", 22) + "\n")
-	for i, p := range resp.Processes.List {
-		if i >= 5 {
-			break
-		}
-		builder.WriteString(fmt.Sprintf("%d. %s\n   CPU: %.1f%% | 内存: %.1f%%\n", i+1, p.Name, p.Consume.CPU, p.Consume.Memory))
-	}
-
-	WechatPush(strings.TrimSpace(builder.String()))
-}
-
-// PushUGreenBackupStatus 菜单触发：备份任务
-func PushUGreenBackupStatus() {
-	if len(Config.UGreen) == 0 {
-		return
-	}
-	config := Config.UGreen[0]
-	ip, port := SplitIpPort(config.IpPort, 9999)
-	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
-	if authInfo == nil {
-		return
-	}
-
-	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v2/web/syncbackup/task/list", map[string]string{"backup_type": "backup", "page": "1", "size": "100"}, nil)
-	if err != nil {
-		WechatPush("⚠️ 获取备份任务失败: " + err.Error())
-		return
-	}
-
-	var result struct {
-		List []struct {
-			TaskName     string `json:"task_name"`
-			Status       int    `json:"status"`
-			LastSyncTime int64  `json:"last_sync_time"`
-		} `json:"list"`
-	}
-	json.Unmarshal(raw, &result)
-
-	var builder strings.Builder
-	builder.WriteString("🔄 备份任务状态\n")
-	builder.WriteString(strings.Repeat("-", 22) + "\n")
-	if len(result.List) == 0 {
-		builder.WriteString("当前没有配置备份任务\n")
-	} else {
-		for _, t := range result.List {
-			statusStr := "未知"
-			switch t.Status {
-			case 0:
-				statusStr = "已停止 ⏸️"
-			case 1:
-				statusStr = "正常 ✅"
-			case 2:
-				statusStr = "运行中 🔄"
-			case 3:
-				statusStr = "已暂停 ⏸️"
-			case 4:
-				statusStr = "错误 ❌"
-			}
-			lastSync := "从未运行"
-			if t.LastSyncTime > 0 {
-				lastSync = time.Unix(t.LastSyncTime, 0).Format("2006-01-02 15:04")
-			}
-			builder.WriteString(fmt.Sprintf("📁 %s\n   状态: %s\n   最后同步: %s\n\n", t.TaskName, statusStr, lastSync))
-		}
-	}
-	WechatPush(strings.TrimSpace(builder.String()))
-}
-
-// PushUGreenPowerStatus 菜单触发：电源配置
-func PushUGreenPowerStatus() {
-	if len(Config.UGreen) == 0 {
-		return
-	}
-	config := Config.UGreen[0]
-	ip, port := SplitIpPort(config.IpPort, 9999)
-	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
-	if authInfo == nil {
-		return
-	}
-
-	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/hardware/power/config", nil, nil)
-	if err != nil {
-		WechatPush("⚠️ 获取电源配置失败: " + err.Error())
-		return
-	}
-
-	var cfg struct {
-		Data struct {
-			PowerBoot     bool   `json:"power_boot"`
-			WakeOn        bool   `json:"wake_on"`
-			HardDriveFlag bool   `json:"hard_drive_flag"`
-			HardDriveTime int    `json:"hard_drive_time"`
-			HardDriveUnit string `json:"hard_drive_unit"`
-		} `json:"data"`
-	}
-	json.Unmarshal(raw, &cfg)
-	if !cfg.Data.PowerBoot && !cfg.Data.HardDriveFlag && !cfg.Data.WakeOn {
-		json.Unmarshal(raw, &cfg.Data)
-	}
-
-	var builder strings.Builder
-	builder.WriteString("⚡ 电源与休眠配置\n")
-	builder.WriteString(strings.Repeat("-", 22) + "\n")
-
-	statusMap := func(b bool) string {
-		if b {
-			return "已开启 ✅"
-		}
-		return "已关闭 ❌"
-	}
-
-	unitMap := func(u string) string {
-		if u == "H" {
-			return "小时"
-		}
-		return "分钟"
-	}
-
-	builder.WriteString(fmt.Sprintf("来电自启: %s\n", statusMap(cfg.Data.PowerBoot)))
-	builder.WriteString(fmt.Sprintf("网络唤醒(WOL): %s\n", statusMap(cfg.Data.WakeOn)))
-	builder.WriteString(fmt.Sprintf("内置硬盘休眠: %s\n", statusMap(cfg.Data.HardDriveFlag)))
-	if cfg.Data.HardDriveFlag {
-		builder.WriteString(fmt.Sprintf("休眠等待时间: %d %s\n", cfg.Data.HardDriveTime, unitMap(cfg.Data.HardDriveUnit)))
-	}
-
-	WechatPush(strings.TrimSpace(builder.String()))
 }
