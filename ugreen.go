@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -45,7 +46,6 @@ type UGreenLoginResp struct {
 
 // UGreenSystemInfo 汇总所有监控数据
 type UGreenSystemInfo struct {
-	// CPU 与 内存信息 (来自 taskmgr API)
 	UsageCpu    float64 `json:"usageCpu"`
 	CpuTemp     float64 `json:"cpuTemp"`
 	CpuFan      int     `json:"cpuFan"`
@@ -54,7 +54,6 @@ type UGreenSystemInfo struct {
 	MemoryUsed  int64   `json:"memoryUsed"`
 	MemoryTotal int64   `json:"memoryTotal"`
 
-	// 网络速率信息 (来自 taskmgr API)
 	NetworkReceive       string  `json:"networkReceive"`
 	NetworkTransmit      string  `json:"networkTransmit"`
 	NetworkReceiveValue  float64 `json:"networkReceiveValue"`
@@ -62,7 +61,6 @@ type UGreenSystemInfo struct {
 	NetworkTransmitValue float64 `json:"networkTransmitValue"`
 	NetworkTransmitUnit  string  `json:"networkTransmitUnit"`
 
-	// 系统与存储状态 (来自 widget API)
 	System  UGreenSystemStatus  `json:"system"`
 	Storage []UGreenStorageItem `json:"storage"`
 }
@@ -169,7 +167,7 @@ func ProcessUGreen() {
 	}
 }
 
-// PushUGreenSystemStatus 主动获取绿联系统状态并向微信推送报告（供整点或菜单按钮触发）
+// PushUGreenSystemStatus 主动获取绿联系统状态并向微信推送报告
 func PushUGreenSystemStatus() {
 	if len(Config.UGreen) == 0 {
 		return
@@ -374,7 +372,6 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 			continue
 		}
 
-		// --- 新增：尝试剥离绿联 API 可能存在的外层 {"data": {...}} 或 {"result": {...}} ---
 		var wrapper map[string]json.RawMessage
 		if json.Unmarshal(dataRaw, &wrapper) == nil {
 			if data, ok := wrapper["data"]; ok && len(data) > 0 {
@@ -383,7 +380,6 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 				dataRaw = result
 			}
 		}
-		// -------------------------------------------------------------------
 
 		var raw map[string]interface{}
 		if json.Unmarshal(dataRaw, &raw) != nil {
@@ -412,7 +408,6 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 }
 
 func parseUGreenTaskmgrStats(raw []byte, info *UGreenSystemInfo) {
-	// 新增外层包裹，匹配绿联 API 的 {"code":xxx, "data": {...}} 格式
 	var respWrapper struct {
 		Data struct {
 			Overview struct {
@@ -462,7 +457,6 @@ func parseUGreenTaskmgrStats(raw []byte, info *UGreenSystemInfo) {
 		return
 	}
 
-	// 重新赋值给 data，保持原有逻辑不变
 	data := respWrapper.Data
 
 	if len(data.Overview.CPU) > 0 {
@@ -571,7 +565,6 @@ func buildUGreenPushContent(notices []UGreenNotice, typeName string) string {
 	return builder.String()
 }
 
-// buildUGreenSystemStatusPushContent 格式化输出状态报告文本
 func buildUGreenSystemStatusPushContent(info *UGreenSystemInfo, typeName string) string {
 	if info == nil {
 		return ""
@@ -610,4 +603,119 @@ func buildUGreenSystemStatusPushContent(info *UGreenSystemInfo, typeName string)
 		}
 	}
 	return builder.String()
+}
+
+// ==================== 新增：性能指令发送模块 ====================
+
+// HandleUGreenPerfCommand 解析并执行微信发来的性能控制文本指令
+func HandleUGreenPerfCommand(command string) {
+	if len(Config.UGreen) == 0 {
+		WechatPush("⚠️ 未配置绿联 NAS，无法执行指令")
+		return
+	}
+
+	// 默认控制配置中的第一台绿联设备
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := loadUGreenAuthInfo(ip, port)
+
+	if authInfo == nil {
+		newAuth, err := loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
+		if err != nil {
+			WechatPush(fmt.Sprintf("❌ 鉴权失败，无法执行指令: %v", err))
+			return
+		}
+		authInfo = newAuth
+	}
+
+	upperCommand := strings.ToUpper(strings.TrimSpace(command))
+	isFan := strings.HasPrefix(upperCommand, "风扇")
+	isCPU := strings.HasPrefix(upperCommand, "CPU")
+
+	var apiPath string
+	var payload map[string]interface{}
+	var successMsg string
+
+	// 解析参数与构造对应API请求
+	if isFan {
+		modeStr := strings.TrimSpace(strings.TrimPrefix(upperCommand, "风扇"))
+		mode, err := strconv.Atoi(modeStr)
+		if err != nil || mode < 1 || mode > 3 {
+			WechatPush("⚠️ 风扇指令格式错误。\n支持的模式:\n1: 静音\n2: 正常\n3: 全速\n\n例如发送: 风扇 2")
+			return
+		}
+		apiPath = "/ugreen/v1/hw/fan/mode"
+		payload = map[string]interface{}{"mode": mode}
+		modes := map[int]string{1: "静音", 2: "正常", 3: "全速"}
+		successMsg = fmt.Sprintf("🌀 风扇模式已下发切换指令: %s", modes[mode])
+	} else if isCPU {
+		modeStr := strings.TrimSpace(strings.TrimPrefix(upperCommand, "CPU"))
+		mode, err := strconv.Atoi(modeStr)
+		if err != nil || mode < 0 || mode > 2 {
+			WechatPush("⚠️ CPU指令格式错误。\n支持的模式:\n0: 高性能\n1: 均衡\n2: 节能\n\n例如发送: CPU 1")
+			return
+		}
+		apiPath = "/ugreen/v1/hw/cpu/mode"
+		payload = map[string]interface{}{"mode": mode}
+		modes := map[int]string{0: "高性能", 1: "均衡", 2: "节能"}
+		successMsg = fmt.Sprintf("⚡ CPU 模式已下发切换指令: %s", modes[mode])
+	}
+
+	err := postUGreenAPI(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL, apiPath, payload)
+
+	if err != nil {
+		// Token 失效重试
+		authInfo, err = loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
+		if err == nil {
+			err = postUGreenAPI(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL, apiPath, payload)
+		}
+	}
+
+	if err != nil {
+		WechatPush(fmt.Sprintf("❌ 性能指令执行失败:\n%v", err))
+	} else {
+		WechatPush(successMsg)
+	}
+}
+
+// postUGreenAPI 通用的绿联 POST 请求封装 (用于参数修改等写操作)
+func postUGreenAPI(tokenID, token, ip string, port int, useSSL bool, apiPath string, payload map[string]interface{}) error {
+	protocol := "http"
+	if useSSL {
+		protocol = "https"
+	}
+	url := fmt.Sprintf("%s://%s:%d%s", protocol, ip, port, apiPath)
+
+	reqBody, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	req.Header.Set("x-specify-language", "zh-CN")
+	req.Header.Set("x-ugreen-security-key", tokenID)
+	req.Header.Set("x-ugreen-token", token)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("解析接口结果失败")
+	}
+
+	// 绿联API成功一般返回 code: 0 或 code: 200
+	if code, ok := result["code"].(float64); ok && code != 200 && code != 0 {
+		errMsg := "未知错误"
+		if msg, ok := result["msg"].(string); ok {
+			errMsg = msg
+		}
+		return fmt.Errorf("返回错误码: %v, 提示: %s", code, errMsg)
+	}
+	return nil
 }
