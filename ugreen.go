@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,6 +26,7 @@ type UGreenAuthInfo struct {
 	TokenID   string `json:"token_id"`
 	Token     string `json:"token"`
 	PublicKey string `json:"public_key"`
+	CookieStr string `json:"cookie_str"` // 核心修复：必须保存并传递登录态 Cookie
 }
 
 type UGreenNotice struct {
@@ -108,14 +113,9 @@ func ProcessUGreen() {
 		}
 
 		logFile := filepath.Join("data", "log", fmt.Sprintf("%s_%d.log", ip, port))
-		authInfo := loadUGreenAuthInfo(ip, port)
-
+		authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
 		if authInfo == nil {
-			newAuth, err := loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
-			if err != nil {
-				continue
-			}
-			authInfo = newAuth
+			continue
 		}
 
 		notices, code, err := fetchUGreenNotices(authInfo, ip, port, config.UseSSL)
@@ -238,13 +238,7 @@ func PushUGreenNotifyStatus() {
 	}
 }
 
-// PushUGreenFeatureStatus 占位与扩展框架
-func PushUGreenFeatureStatus(featureName string) {
-	msg := fmt.Sprintf("🚧 [%s] 接口架构已就绪。\n\n由于绿联深层 API 暂未公开，如需启用此模块，请在 ugreen.go 的底层预留函数中填入实际 API 路径；或将 ugreen-monitor 编译进 Docker 镜像通过系统命令调用。", featureName)
-	WechatPush(msg)
-}
-
-// ==================== 新增：性能控制与加密 API 请求 ====================
+// ==================== 深层加密 API 与性能控制 ====================
 
 // HandleUGreenPerfCommand 解析并执行微信发来的性能控制文本指令
 func HandleUGreenPerfCommand(command string) {
@@ -254,14 +248,9 @@ func HandleUGreenPerfCommand(command string) {
 	config := Config.UGreen[0]
 	ip, port := SplitIpPort(config.IpPort, 9999)
 	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
-
-	// 强制重新登录以获取新的 PublicKey（兼容旧配置文件缺失PublicKey的情况）
-	if authInfo == nil || authInfo.PublicKey == "" {
-		authInfo, _ = loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
-		if authInfo == nil {
-			WechatPush("❌ 控制指令失败：登录凭证无效")
-			return
-		}
+	if authInfo == nil {
+		WechatPush("❌ 控制指令失败：登录凭证无效")
+		return
 	}
 
 	upperCommand := strings.ToUpper(strings.TrimSpace(command))
@@ -278,7 +267,6 @@ func HandleUGreenPerfCommand(command string) {
 			WechatPush("⚠️ 风扇指令格式错误。\n1: 静音 | 2: 正常 | 3: 全速\n例如: 风扇 2")
 			return
 		}
-		// 风扇使用的是带有加密参数的 GET 请求
 		_, err = requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/hardware/fan/start", map[string]string{"mode": strconv.Itoa(mode)}, nil)
 		modes := map[int]string{1: "静音", 2: "正常", 3: "全速"}
 		successMsg = fmt.Sprintf("🌀 风扇模式已成功切换为: %s", modes[mode])
@@ -289,7 +277,6 @@ func HandleUGreenPerfCommand(command string) {
 			WechatPush("⚠️ CPU指令格式错误。\n0: 高性能 | 1: 均衡 | 2: 节能\n例如: CPU 1")
 			return
 		}
-		// CPU 使用的是加密的 POST 请求
 		_, err = requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "POST", "/ugreen/v1/hardware/cpu/frequency", nil, map[string]interface{}{"frequency": mode})
 		modes := map[int]string{0: "高性能", 1: "均衡", 2: "节能"}
 		successMsg = fmt.Sprintf("⚡ CPU 模式已成功切换为: %s", modes[mode])
@@ -302,24 +289,21 @@ func HandleUGreenPerfCommand(command string) {
 	}
 }
 
-// requestUGreenDeepAPI 绿联深层加密 API 请求器 (支持 GET/POST 加密)
+// requestUGreenDeepAPI 绿联深层加密 API 请求器 (支持 GET/POST 动态加密与 Cookie 携带)
 func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL bool, method string, apiPath string, params map[string]string, body map[string]interface{}) ([]byte, error) {
 	protocol := "http"
 	if useSSL {
 		protocol = "https"
 	}
 
-	// 生成 32 位随机 AES 密钥
-	aesKey := strings.ReplaceAll(time.Now().Format("20060102150405.000000000")+"abc", ".", "")
-	if len(aesKey) > 32 {
-		aesKey = aesKey[:32]
-	} else {
-		aesKey = fmt.Sprintf("%-32s", aesKey)
-	}
+	// 生成安全的 16 字节(32 字符)随机 AES 密钥
+	b := make([]byte, 16)
+	rand.Read(b)
+	aesKey := hex.EncodeToString(b)
 
 	urlStr := fmt.Sprintf("%s://%s:%d%s", protocol, ip, port, apiPath)
 
-	// 1. 处理 GET 加密参数
+	// 1. 处理 GET 加密参数 (核心修复：必须 url.QueryEscape，否则 Base64 的加号会丢失)
 	if len(params) > 0 {
 		var query []string
 		for k, v := range params {
@@ -327,7 +311,7 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 		}
 		rawQuery := strings.Join(query, "&")
 		encQuery, _ := AESGCMEncrypt(aesKey, rawQuery)
-		urlStr += "?encrypt_query=" + encQuery
+		urlStr += "?encrypt_query=" + url.QueryEscape(encQuery)
 	}
 
 	// 2. 处理 POST 加密请求体
@@ -344,15 +328,21 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 
 	// 3. 头部权限与密钥装载
 	securityCode, _ := RsaEncrypt(authInfo.PublicKey, aesKey)
-	ugreenToken, _ := RsaEncrypt(authInfo.PublicKey, authInfo.Token) // 动态用公钥加密明文 Token
+	ugreenToken, _ := RsaEncrypt(authInfo.PublicKey, authInfo.Token)
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Client-Id", "cli-go-tool")
+	req.Header.Set("Client-Version", "77682") // 对齐参考源码
 	req.Header.Set("UG-Agent", "PC/WEB")
 	req.Header.Set("X-Specify-Language", "zh-CN")
 	req.Header.Set("X-Ugreen-Security-Code", securityCode)
-	req.Header.Set("X-Ugreen-Security-Key", MD5Hex(authInfo.Token)) // 正确计算明文 Token 的 MD5
+	req.Header.Set("X-Ugreen-Security-Key", MD5Hex(authInfo.Token))
 	req.Header.Set("X-Ugreen-Token", ugreenToken)
+
+	// 核心修复：携带 Cookie
+	if authInfo.CookieStr != "" {
+		req.Header.Set("Cookie", authInfo.CookieStr)
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	resp, err := client.Do(req)
@@ -373,8 +363,6 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 			}
 			return nil, fmt.Errorf("返回错误码: %v, %s", code, msg)
 		}
-
-		// 若返回被加密的 data
 		if dataMap, ok := result["data"].(map[string]interface{}); ok {
 			if encResp, ok := dataMap["encrypt_resp_body"].(string); ok {
 				dec, _ := AESGCMDecrypt(aesKey, encResp)
@@ -389,7 +377,8 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 
 func ensureAuth(username, password, ip string, port int, useSSL bool) *UGreenAuthInfo {
 	authInfo := loadUGreenAuthInfo(ip, port)
-	if authInfo != nil {
+	// 核心修复：如果旧缓存文件缺少 PublicKey 或 Cookie，强制重新登录获取，免除用户手动清理缓存的烦恼
+	if authInfo != nil && authInfo.PublicKey != "" && authInfo.CookieStr != "" {
 		return authInfo
 	}
 	newAuth, _ := loginUGreen(username, password, ip, port, useSSL)
@@ -401,7 +390,13 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 	if useSSL {
 		protocol = "https"
 	}
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+
+	// 核心修复：使用 CookieJar 收集完整的登录态 Cookie
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Jar:       jar,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+	}
 
 	checkURL := fmt.Sprintf("%s://%s:%d/ugreen/v1/verify/check?token=", protocol, ip, port)
 	checkReqBody, _ := json.Marshal(map[string]string{"username": username})
@@ -442,10 +437,19 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 
 	pubKeyBytes, _ := base64.StdEncoding.DecodeString(loginResp.Data.PublicKey)
 
+	// 提取并序列化 Cookies 备用
+	u, _ := url.Parse(fmt.Sprintf("%s://%s:%d", protocol, ip, port))
+	var cookiePairs []string
+	for _, c := range jar.Cookies(u) {
+		cookiePairs = append(cookiePairs, c.Name+"="+c.Value)
+	}
+	cookieStr := strings.Join(cookiePairs, "; ")
+
 	authInfo := &UGreenAuthInfo{
 		TokenID:   loginResp.Data.TokenID,
-		Token:     loginResp.Data.Token, // 【关键修复】：仅保存明文 Token，不再存成加密状态
-		PublicKey: string(pubKeyBytes),  // 保存公钥用于后续动态加密
+		Token:     loginResp.Data.Token,
+		PublicKey: string(pubKeyBytes),
+		CookieStr: cookieStr,
 	}
 	saveUGreenAuthInfo(ip, port, authInfo)
 	return authInfo, nil
@@ -456,18 +460,20 @@ func fetchUGreenNotices(authInfo *UGreenAuthInfo, ip string, port int, useSSL bo
 	if useSSL {
 		protocol = "https"
 	}
-	url := fmt.Sprintf("%s://%s:%d/ugreen/v1/desktop/message/list", protocol, ip, port)
+	urlStr := fmt.Sprintf("%s://%s:%d/ugreen/v1/desktop/message/list", protocol, ip, port)
 
 	payload := map[string]interface{}{"level": []string{"info", "important", "warning"}, "page": 1, "size": 10}
 	reqBody, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	req, _ := http.NewRequest("POST", urlStr, bytes.NewBuffer(reqBody))
 
-	// 动态加密 Token
 	encToken, _ := RsaEncrypt(authInfo.PublicKey, authInfo.Token)
 
 	req.Header.Set("x-specify-language", "zh-CN")
 	req.Header.Set("x-ugreen-security-key", authInfo.TokenID)
 	req.Header.Set("x-ugreen-token", encToken)
+	if authInfo.CookieStr != "" {
+		req.Header.Set("Cookie", authInfo.CookieStr)
+	}
 
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	resp, err := client.Do(req)
@@ -494,13 +500,15 @@ func fetchUGreenSystemInfo(authInfo *UGreenAuthInfo, ip string, port int, useSSL
 
 	doGet := func(apiPath string) ([]byte, error) {
 		req, _ := http.NewRequest("GET", baseURL+apiPath, nil)
-
-		// 动态加密 Token
 		encToken, _ := RsaEncrypt(authInfo.PublicKey, authInfo.Token)
 
 		req.Header.Set("x-specify-language", "zh-CN")
 		req.Header.Set("x-ugreen-security-key", authInfo.TokenID)
 		req.Header.Set("x-ugreen-token", encToken)
+		if authInfo.CookieStr != "" {
+			req.Header.Set("Cookie", authInfo.CookieStr)
+		}
+
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
