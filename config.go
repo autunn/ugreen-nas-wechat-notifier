@@ -57,14 +57,14 @@ type FnOsConfig struct {
 	Cookie         string `json:"cookie"`
 }
 
-// initConfig 从当前目录加载 config.json
+// initConfig 从当前目录加载 config/config.json
 func initConfig() {
 	CfgMu.Lock()
 	defer CfgMu.Unlock()
 
-	data, err := os.ReadFile("config.json")
+	data, err := os.ReadFile("config/config.json")
 	if err != nil {
-		log.Println("未找到 config.json，将以空配置启动，请通过网页进行配置。")
+		log.Println("未找到 config/config.json，将以空配置启动，请通过网页进行配置。")
 		Config = AppConfig{
 			AdminPassword:   "admin",
 			IntervalMinutes: 5,
@@ -74,7 +74,7 @@ func initConfig() {
 
 	err = json.Unmarshal(data, &Config)
 	if err != nil {
-		log.Fatalf("解析 config.json 失败: %v", err)
+		log.Fatalf("解析 config/config.json 失败: %v", err)
 	}
 
 	if Config.AdminPassword == "" {
@@ -95,5 +95,5 @@ func SaveConfig(newConfig AppConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile("config.json", data, 0644)
+	return os.WriteFile("config/config.json", data, 0644)
 }
