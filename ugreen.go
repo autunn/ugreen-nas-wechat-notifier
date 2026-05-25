@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,8 +19,8 @@ import (
 
 type UGreenAuthInfo struct {
 	TokenID   string `json:"token_id"`
-	Token     string `json:"token"`      // 修正：此处直接保存明文 Token，不做提前加密
-	PublicKey string `json:"public_key"` // 保存公钥用于加密
+	Token     string `json:"token"`
+	PublicKey string `json:"public_key"`
 }
 
 type UGreenNotice struct {
@@ -238,228 +237,13 @@ func PushUGreenNotifyStatus() {
 	}
 }
 
-// PushUGreenDockerStatus 菜单触发：Docker 状态
-func PushUGreenDockerStatus() {
-	if len(Config.UGreen) == 0 {
-		return
-	}
-	config := Config.UGreen[0]
-	ip, port := SplitIpPort(config.IpPort, 9999)
-	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
-	if authInfo == nil {
-		return
-	}
-
-	ovRaw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/docker/view/ObtainOverviewInfo", nil, nil)
-	if err != nil {
-		WechatPush("⚠️ 获取 Docker 状态失败: " + err.Error())
-		return
-	}
-	var overview struct {
-		RunContainerCount int `json:"runContainerCount"`
-		ContainerCount    int `json:"containerCount"`
-		ImageCount        int `json:"imageCount"`
-		CpuUsed           int `json:"cpuUsed"`
-	}
-	json.Unmarshal(ovRaw, &overview)
-
-	listRaw, _ := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "POST", "/ugreen/v1/docker/container/ContainerListV2", nil, map[string]interface{}{"pageNum": 1, "pageSize": 200})
-	var list struct {
-		Result []struct {
-			Name   string `json:"name"`
-			Status string `json:"status"`
-		} `json:"result"`
-	}
-	json.Unmarshal(listRaw, &list)
-
-	var builder strings.Builder
-	builder.WriteString("🐳 Docker 运行概览\n")
-	builder.WriteString(strings.Repeat("-", 22) + "\n")
-	builder.WriteString(fmt.Sprintf("运行中容器: %d / %d\n", overview.RunContainerCount, overview.ContainerCount))
-	builder.WriteString(fmt.Sprintf("本地镜像数: %d\n", overview.ImageCount))
-	builder.WriteString(fmt.Sprintf("整体CPU负载: %d%%\n\n", overview.CpuUsed))
-
-	builder.WriteString("🟢 运行中的容器:\n")
-	count := 0
-	for _, c := range list.Result {
-		if c.Status == "running" || c.Status == "Up" {
-			builder.WriteString(fmt.Sprintf("▪️ %s\n", c.Name))
-			count++
-		}
-	}
-	if count == 0 {
-		builder.WriteString("当前无运行中容器\n")
-	}
-
-	WechatPush(strings.TrimSpace(builder.String()))
+// PushUGreenFeatureStatus 占位与扩展框架
+func PushUGreenFeatureStatus(featureName string) {
+	msg := fmt.Sprintf("🚧 [%s] 接口架构已就绪。\n\n由于绿联深层 API 暂未公开，如需启用此模块，请在 ugreen.go 的底层预留函数中填入实际 API 路径；或将 ugreen-monitor 编译进 Docker 镜像通过系统命令调用。", featureName)
+	WechatPush(msg)
 }
 
-// PushUGreenPsStatus 菜单触发：进程列表
-func PushUGreenPsStatus() {
-	if len(Config.UGreen) == 0 {
-		return
-	}
-	config := Config.UGreen[0]
-	ip, port := SplitIpPort(config.IpPort, 9999)
-	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
-	if authInfo == nil {
-		return
-	}
-
-	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/taskmgr/services/processes", nil, nil)
-	if err != nil {
-		WechatPush("⚠️ 获取进程列表失败: " + err.Error())
-		return
-	}
-
-	var resp struct {
-		Processes struct {
-			List []struct {
-				Name    string `json:"name"`
-				Consume struct {
-					CPU    float64 `json:"cpu_used_percent"`
-					Memory float64 `json:"mem_used_percent"`
-				} `json:"consume"`
-			} `json:"list"`
-		} `json:"processes"`
-	}
-	json.Unmarshal(raw, &resp)
-
-	sort.Slice(resp.Processes.List, func(i, j int) bool {
-		return resp.Processes.List[i].Consume.CPU > resp.Processes.List[j].Consume.CPU
-	})
-
-	var builder strings.Builder
-	builder.WriteString("📈 系统进程占用 (TOP 5)\n")
-	builder.WriteString(strings.Repeat("-", 22) + "\n")
-	for i, p := range resp.Processes.List {
-		if i >= 5 {
-			break
-		}
-		builder.WriteString(fmt.Sprintf("%d. %s\n   CPU: %.1f%% | 内存: %.1f%%\n", i+1, p.Name, p.Consume.CPU, p.Consume.Memory))
-	}
-
-	WechatPush(strings.TrimSpace(builder.String()))
-}
-
-// PushUGreenBackupStatus 菜单触发：备份任务
-func PushUGreenBackupStatus() {
-	if len(Config.UGreen) == 0 {
-		return
-	}
-	config := Config.UGreen[0]
-	ip, port := SplitIpPort(config.IpPort, 9999)
-	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
-	if authInfo == nil {
-		return
-	}
-
-	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v2/web/syncbackup/task/list", map[string]string{"backup_type": "backup", "page": "1", "size": "100"}, nil)
-	if err != nil {
-		WechatPush("⚠️ 获取备份任务失败: " + err.Error())
-		return
-	}
-
-	var result struct {
-		List []struct {
-			TaskName     string `json:"task_name"`
-			Status       int    `json:"status"`
-			LastSyncTime int64  `json:"last_sync_time"`
-		} `json:"list"`
-	}
-	json.Unmarshal(raw, &result)
-
-	var builder strings.Builder
-	builder.WriteString("🔄 备份任务状态\n")
-	builder.WriteString(strings.Repeat("-", 22) + "\n")
-	if len(result.List) == 0 {
-		builder.WriteString("当前没有配置备份任务\n")
-	} else {
-		for _, t := range result.List {
-			statusStr := "未知"
-			switch t.Status {
-			case 0:
-				statusStr = "已停止 ⏸️"
-			case 1:
-				statusStr = "正常 ✅"
-			case 2:
-				statusStr = "运行中 🔄"
-			case 3:
-				statusStr = "已暂停 ⏸️"
-			case 4:
-				statusStr = "错误 ❌"
-			}
-			lastSync := "从未运行"
-			if t.LastSyncTime > 0 {
-				lastSync = time.Unix(t.LastSyncTime, 0).Format("2006-01-02 15:04")
-			}
-			builder.WriteString(fmt.Sprintf("📁 %s\n   状态: %s\n   最后同步: %s\n\n", t.TaskName, statusStr, lastSync))
-		}
-	}
-	WechatPush(strings.TrimSpace(builder.String()))
-}
-
-// PushUGreenPowerStatus 菜单触发：电源配置
-func PushUGreenPowerStatus() {
-	if len(Config.UGreen) == 0 {
-		return
-	}
-	config := Config.UGreen[0]
-	ip, port := SplitIpPort(config.IpPort, 9999)
-	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
-	if authInfo == nil {
-		return
-	}
-
-	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/hardware/power/config", nil, nil)
-	if err != nil {
-		WechatPush("⚠️ 获取电源配置失败: " + err.Error())
-		return
-	}
-
-	var cfg struct {
-		Data struct {
-			PowerBoot     bool   `json:"power_boot"`
-			WakeOn        bool   `json:"wake_on"`
-			HardDriveFlag bool   `json:"hard_drive_flag"`
-			HardDriveTime int    `json:"hard_drive_time"`
-			HardDriveUnit string `json:"hard_drive_unit"`
-		} `json:"data"`
-	}
-	json.Unmarshal(raw, &cfg)
-	if !cfg.Data.PowerBoot && !cfg.Data.HardDriveFlag && !cfg.Data.WakeOn {
-		json.Unmarshal(raw, &cfg.Data)
-	}
-
-	var builder strings.Builder
-	builder.WriteString("⚡ 电源与休眠配置\n")
-	builder.WriteString(strings.Repeat("-", 22) + "\n")
-
-	statusMap := func(b bool) string {
-		if b {
-			return "已开启 ✅"
-		}
-		return "已关闭 ❌"
-	}
-
-	unitMap := func(u string) string {
-		if u == "H" {
-			return "小时"
-		}
-		return "分钟"
-	}
-
-	builder.WriteString(fmt.Sprintf("来电自启: %s\n", statusMap(cfg.Data.PowerBoot)))
-	builder.WriteString(fmt.Sprintf("网络唤醒(WOL): %s\n", statusMap(cfg.Data.WakeOn)))
-	builder.WriteString(fmt.Sprintf("内置硬盘休眠: %s\n", statusMap(cfg.Data.HardDriveFlag)))
-	if cfg.Data.HardDriveFlag {
-		builder.WriteString(fmt.Sprintf("休眠等待时间: %d %s\n", cfg.Data.HardDriveTime, unitMap(cfg.Data.HardDriveUnit)))
-	}
-
-	WechatPush(strings.TrimSpace(builder.String()))
-}
-
-// ==================== 性能控制与加密 API 请求 ====================
+// ==================== 新增：性能控制与加密 API 请求 ====================
 
 // HandleUGreenPerfCommand 解析并执行微信发来的性能控制文本指令
 func HandleUGreenPerfCommand(command string) {
@@ -470,6 +254,7 @@ func HandleUGreenPerfCommand(command string) {
 	ip, port := SplitIpPort(config.IpPort, 9999)
 	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
 
+	// 强制重新登录以获取新的 PublicKey（兼容旧配置文件缺失PublicKey的情况）
 	if authInfo == nil || authInfo.PublicKey == "" {
 		authInfo, _ = loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
 		if authInfo == nil {
@@ -492,6 +277,7 @@ func HandleUGreenPerfCommand(command string) {
 			WechatPush("⚠️ 风扇指令格式错误。\n1: 静音 | 2: 正常 | 3: 全速\n例如: 风扇 2")
 			return
 		}
+		// 风扇使用的是带有加密参数的 GET 请求
 		_, err = requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/hardware/fan/start", map[string]string{"mode": strconv.Itoa(mode)}, nil)
 		modes := map[int]string{1: "静音", 2: "正常", 3: "全速"}
 		successMsg = fmt.Sprintf("🌀 风扇模式已成功切换为: %s", modes[mode])
@@ -502,6 +288,7 @@ func HandleUGreenPerfCommand(command string) {
 			WechatPush("⚠️ CPU指令格式错误。\n0: 高性能 | 1: 均衡 | 2: 节能\n例如: CPU 1")
 			return
 		}
+		// CPU 使用的是加密的 POST 请求
 		_, err = requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "POST", "/ugreen/v1/hardware/cpu/frequency", nil, map[string]interface{}{"frequency": mode})
 		modes := map[int]string{0: "高性能", 1: "均衡", 2: "节能"}
 		successMsg = fmt.Sprintf("⚡ CPU 模式已成功切换为: %s", modes[mode])
@@ -556,14 +343,14 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 
 	// 3. 头部权限与密钥装载
 	securityCode, _ := RsaEncrypt(authInfo.PublicKey, aesKey)
-	ugreenToken, _ := RsaEncrypt(authInfo.PublicKey, authInfo.Token) // 这里加密给请求头
+	ugreenToken, _ := RsaEncrypt(authInfo.PublicKey, authInfo.Token) // 动态用公钥加密明文 Token
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Client-Id", "cli-go-tool")
 	req.Header.Set("UG-Agent", "PC/WEB")
 	req.Header.Set("X-Specify-Language", "zh-CN")
 	req.Header.Set("X-Ugreen-Security-Code", securityCode)
-	req.Header.Set("X-Ugreen-Security-Key", MD5Hex(authInfo.Token)) // MD5 取的是明文 Token
+	req.Header.Set("X-Ugreen-Security-Key", MD5Hex(authInfo.Token)) // 正确计算明文 Token 的 MD5
 	req.Header.Set("X-Ugreen-Token", ugreenToken)
 
 	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
@@ -586,6 +373,7 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 			return nil, fmt.Errorf("返回错误码: %v, %s", code, msg)
 		}
 
+		// 若返回被加密的 data
 		if dataMap, ok := result["data"].(map[string]interface{}); ok {
 			if encResp, ok := dataMap["encrypt_resp_body"].(string); ok {
 				dec, _ := AESGCMDecrypt(aesKey, encResp)
@@ -655,8 +443,8 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 
 	authInfo := &UGreenAuthInfo{
 		TokenID:   loginResp.Data.TokenID,
-		Token:     loginResp.Data.Token, // 修正：直接保存原始Token
-		PublicKey: string(pubKeyBytes),
+		Token:     loginResp.Data.Token, // 【关键修复】：仅保存明文 Token，不再存成加密状态
+		PublicKey: string(pubKeyBytes),  // 保存公钥用于后续动态加密
 	}
 	saveUGreenAuthInfo(ip, port, authInfo)
 	return authInfo, nil
@@ -673,11 +461,12 @@ func fetchUGreenNotices(authInfo *UGreenAuthInfo, ip string, port int, useSSL bo
 	reqBody, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
 
+	// 动态加密 Token
 	encToken, _ := RsaEncrypt(authInfo.PublicKey, authInfo.Token)
 
 	req.Header.Set("x-specify-language", "zh-CN")
 	req.Header.Set("x-ugreen-security-key", authInfo.TokenID)
-	req.Header.Set("x-ugreen-token", encToken) // 动态加密传递
+	req.Header.Set("x-ugreen-token", encToken)
 
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	resp, err := client.Do(req)
@@ -704,11 +493,13 @@ func fetchUGreenSystemInfo(authInfo *UGreenAuthInfo, ip string, port int, useSSL
 
 	doGet := func(apiPath string) ([]byte, error) {
 		req, _ := http.NewRequest("GET", baseURL+apiPath, nil)
+
+		// 动态加密 Token
 		encToken, _ := RsaEncrypt(authInfo.PublicKey, authInfo.Token)
 
 		req.Header.Set("x-specify-language", "zh-CN")
 		req.Header.Set("x-ugreen-security-key", authInfo.TokenID)
-		req.Header.Set("x-ugreen-token", encToken) // 动态加密传递
+		req.Header.Set("x-ugreen-token", encToken)
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
