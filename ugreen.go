@@ -181,7 +181,7 @@ func PushUGreenSystemStatus() {
 	}
 }
 
-// PushUGreenStorageStatus 菜单触发：独立存储状态
+// PushUGreenStorageStatus 菜单触发：独立存储状态 (重构为底层 API 获取)
 func PushUGreenStorageStatus() {
 	if len(Config.UGreen) == 0 {
 		return
@@ -193,29 +193,179 @@ func PushUGreenStorageStatus() {
 		return
 	}
 
-	info, _ := fetchUGreenSystemInfo(authInfo, ip, port, config.UseSSL)
-	if info != nil && len(info.Storage) > 0 {
-		var builder strings.Builder
-		builder.WriteString(fmt.Sprintf("💾 %s 存储卷状态详情\n", config.NotifyTypeName))
-		builder.WriteString(strings.Repeat("-", 22) + "\n")
-		for _, storage := range info.Storage {
-			var usedStr, totalStr string
-			if storage.Size > 1024*1024*1024*1024 {
-				usedStr = fmt.Sprintf("%.2f TB", float64(storage.Used)/1024/1024/1024/1024)
-				totalStr = fmt.Sprintf("%.2f TB", float64(storage.Size)/1024/1024/1024/1024)
-			} else {
-				usedStr = fmt.Sprintf("%.2f GB", float64(storage.Used)/1024/1024/1024)
-				totalStr = fmt.Sprintf("%.2f GB", float64(storage.Size)/1024/1024/1024)
-			}
-			usagePct := float64(storage.Used) / float64(storage.Size) * 100
-			builder.WriteString(fmt.Sprintf("🔹 %s (%s)\n", storage.Name, storage.PoolName))
-			builder.WriteString(fmt.Sprintf("容量: %s / %s (%.1f%%)\n", usedStr, totalStr, usagePct))
-			builder.WriteString(fmt.Sprintf("告警阈值: %d%%\n\n", storage.NotifyPct))
-		}
-		WechatPush(strings.TrimSpace(builder.String()))
-	} else {
-		WechatPush("⚠️ 未获取到存储卷信息")
+	raw, err := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/storage/volume/list", nil, nil)
+	if err != nil {
+		WechatPush("⚠️ 获取存储卷信息失败: " + err.Error())
+		return
 	}
+
+	type VolumeItem struct {
+		Name     string `json:"name"`
+		Label    string `json:"label"`
+		PoolName string `json:"pool_name"`
+		Size     int64  `json:"size"`
+		Used     int64  `json:"used"`
+		Status   int    `json:"status"`
+		FsType   string `json:"fs_type"`
+	}
+
+	var volumes []VolumeItem
+	if err := json.Unmarshal(raw, &volumes); err != nil {
+		var wrapped struct {
+			List []VolumeItem `json:"list"`
+		}
+		if err2 := json.Unmarshal(raw, &wrapped); err2 == nil {
+			volumes = wrapped.List
+		}
+	}
+
+	if len(volumes) == 0 {
+		WechatPush("⚠️ 当前未获取到存储卷信息 (或无存储空间)")
+		return
+	}
+
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("💾 %s 存储卷状态详情\n", config.NotifyTypeName))
+	builder.WriteString(strings.Repeat("-", 22) + "\n")
+
+	for _, v := range volumes {
+		var usedStr, totalStr string
+		if v.Size > 1024*1024*1024*1024 {
+			usedStr = fmt.Sprintf("%.2f TB", float64(v.Used)/1024/1024/1024/1024)
+			totalStr = fmt.Sprintf("%.2f TB", float64(v.Size)/1024/1024/1024/1024)
+		} else {
+			usedStr = fmt.Sprintf("%.2f GB", float64(v.Used)/1024/1024/1024)
+			totalStr = fmt.Sprintf("%.2f GB", float64(v.Size)/1024/1024/1024)
+		}
+		usagePct := float64(0)
+		if v.Size > 0 {
+			usagePct = float64(v.Used) / float64(v.Size) * 100
+		}
+
+		label := v.Label
+		if label == "" {
+			label = v.Name
+		}
+
+		builder.WriteString(fmt.Sprintf("🔹 %s (%s)\n", label, v.PoolName))
+		builder.WriteString(fmt.Sprintf("容量: %s / %s (%.1f%%)\n", usedStr, totalStr, usagePct))
+		builder.WriteString(fmt.Sprintf("文件系统: %s\n\n", v.FsType))
+	}
+
+	WechatPush(strings.TrimSpace(builder.String()))
+}
+
+// PushUGreenUpsStatus 菜单触发：UPS 电源状态
+func PushUGreenUpsStatus() {
+	if len(Config.UGreen) == 0 {
+		return
+	}
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+	if authInfo == nil {
+		return
+	}
+
+	cfgRaw, _ := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/hardware/ups/config", nil, nil)
+	usbRaw, _ := requestUGreenDeepAPI(authInfo, ip, port, config.UseSSL, "GET", "/ugreen/v1/hardware/ups/usb/info", nil, nil)
+
+	type UpsInfoData struct {
+		Supplier           string `json:"supplier"`
+		ProductMode        string `json:"product_mode"`
+		BatteryCapacity    string `json:"battery_capacity"`
+		EstimateSupplyTime int    `json:"estimate_supply_time"`
+	}
+
+	type UpsCfgData struct {
+		Status           bool        `json:"status"`
+		StandbyTime      int         `json:"standby_time"`
+		StandbyTimeUnit  int         `json:"standby_time_unit"`
+		ProtectType      int         `json:"protect_type"`
+		SnmpUpsConnected bool        `json:"snmp_ups_connected"`
+		UpsInfo          UpsInfoData `json:"ups_info"`
+	}
+
+	var cfg UpsCfgData
+	if err := json.Unmarshal(cfgRaw, &cfg); err != nil {
+		var wrapped struct {
+			Data UpsCfgData `json:"data"`
+		}
+		json.Unmarshal(cfgRaw, &wrapped)
+		cfg = wrapped.Data
+	}
+
+	type UsbData struct {
+		Supplier     string `json:"supplier"`
+		ProductMode  string `json:"product_mode"`
+		UsbUpsInsert bool   `json:"usb_ups_insert"`
+	}
+	var usb UsbData
+	if err := json.Unmarshal(usbRaw, &usb); err != nil {
+		var wrapped struct {
+			Data UsbData `json:"data"`
+		}
+		json.Unmarshal(usbRaw, &wrapped)
+		usb = wrapped.Data
+	}
+
+	var builder strings.Builder
+	builder.WriteString("🔋 UPS 电源状态\n")
+	builder.WriteString(strings.Repeat("-", 22) + "\n")
+
+	if usb.UsbUpsInsert {
+		builder.WriteString(fmt.Sprintf("设备: %s %s (USB)\n", usb.Supplier, usb.ProductMode))
+	} else if cfg.SnmpUpsConnected {
+		builder.WriteString(fmt.Sprintf("设备: %s %s (SNMP)\n", cfg.UpsInfo.Supplier, cfg.UpsInfo.ProductMode))
+	} else {
+		builder.WriteString("⚠️ 当前未连接 UPS 设备或设备离线\n")
+		WechatPush(builder.String())
+		return
+	}
+
+	statusStr := "已停止 ❌"
+	if cfg.Status {
+		statusStr = "运行中 ✅"
+	}
+	builder.WriteString(fmt.Sprintf("服务状态: %s\n", statusStr))
+
+	cap := cfg.UpsInfo.BatteryCapacity
+	if cap == "" {
+		cap = "未知"
+	} else {
+		cap += "%"
+	}
+	builder.WriteString(fmt.Sprintf("当前电量: %s\n", cap))
+
+	est := cfg.UpsInfo.EstimateSupplyTime
+	if est < 0 {
+		builder.WriteString("供电状态: 市电供电中 ⚡\n")
+	} else if est == 0 {
+		builder.WriteString("预计续航: 正在计算中...\n")
+	} else {
+		builder.WriteString(fmt.Sprintf("预计续航: %d秒 (约%.1f分钟)\n", est, float64(est)/60))
+	}
+
+	protectType := "未知"
+	switch cfg.ProtectType {
+	case 0:
+		protectType = "不保护"
+	case 1:
+		protectType = "安全关机"
+	case 2:
+		protectType = "进入待机"
+	}
+	builder.WriteString(fmt.Sprintf("保护模式: %s\n", protectType))
+
+	if cfg.StandbyTime > 0 {
+		unit := "秒"
+		if cfg.StandbyTimeUnit == 1 {
+			unit = "分钟"
+		}
+		builder.WriteString(fmt.Sprintf("等待时间: %d %s后执行保护\n", cfg.StandbyTime, unit))
+	}
+
+	WechatPush(strings.TrimSpace(builder.String()))
 }
 
 // PushUGreenNotifyStatus 菜单触发：主动拉取最新通知
@@ -330,7 +480,6 @@ func PushUGreenPsStatus() {
 	}
 	json.Unmarshal(raw, &resp)
 
-	// 源码对齐：合并 Services 和 Processes 以确保完整获取数据
 	allProcs := append(resp.Services.List, resp.Processes.List...)
 
 	sort.Slice(allProcs, func(i, j int) bool {
@@ -432,7 +581,19 @@ func PushUGreenPowerStatus() {
 		HardDriveTime int    `json:"hard_drive_time"`
 		HardDriveUnit string `json:"hard_drive_unit"`
 	}
-	json.Unmarshal(raw, &cfgData)
+	if err := json.Unmarshal(raw, &cfgData); err != nil {
+		var wrapped struct {
+			Data struct {
+				PowerBoot     bool   `json:"power_boot"`
+				WakeOn        bool   `json:"wake_on"`
+				HardDriveFlag bool   `json:"hard_drive_flag"`
+				HardDriveTime int    `json:"hard_drive_time"`
+				HardDriveUnit string `json:"hard_drive_unit"`
+			} `json:"data"`
+		}
+		json.Unmarshal(raw, &wrapped)
+		cfgData = wrapped.Data
+	}
 
 	var builder strings.Builder
 	builder.WriteString("⚡ 电源与休眠配置\n")
@@ -513,7 +674,7 @@ func HandleUGreenPerfCommand(command string) {
 	}
 }
 
-// requestUGreenDeepAPI 源码对齐版：精准处理 3 种密文剥离逻辑，URL安全编码，全局Cookie映射
+// requestUGreenDeepAPI 精准处理 3 种密文剥离逻辑，URL安全编码，全局Cookie映射
 func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL bool, method string, apiPath string, params map[string]string, body map[string]interface{}) ([]byte, error) {
 	protocol := "http"
 	if useSSL {
@@ -572,7 +733,7 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 	raw, _ := io.ReadAll(resp.Body)
 	rawStr := string(raw)
 
-	// Attempt 1: 裸密文直接解密 (源码对齐)
+	// Attempt 1: 裸密文直接解密
 	decrypted, err := AESGCMDecrypt(aesKey, rawStr)
 	if err == nil {
 		var apiResp struct {
@@ -591,7 +752,7 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 		return []byte(decrypted), nil
 	}
 
-	// Attempt 2: 外层包装 {"encrypt_resp_body": "..."} (源码对齐)
+	// Attempt 2: 外层包装 {"encrypt_resp_body": "..."}
 	var encResp struct {
 		EncryptRespBody string `json:"encrypt_resp_body"`
 	}
@@ -615,7 +776,7 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 		}
 	}
 
-	// Attempt 3: 标准 JSON 外壳包装内层密文 {"code":200, "data": {...}} (源码对齐)
+	// Attempt 3: 标准 JSON 外壳包装内层密文 {"code":200, "data": {...}}
 	var apiResp struct {
 		Code int             `json:"code"`
 		Msg  string          `json:"msg"`
@@ -653,7 +814,6 @@ func ensureAuth(username, password, ip string, port int, useSSL bool) *UGreenAut
 	return newAuth
 }
 
-// loginUGreen 源码对齐版：修复 Admin 不加密，修复 /ugreen/ Cookie作用域，兼容 x-rsa-token 为空情况
 func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenAuthInfo, error) {
 	protocol := "http"
 	if useSSL {
@@ -667,7 +827,6 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 	}
 
 	encPassword := password
-	// 如果是 admin，源码中不加密直接传；否则需要拿一次 RSA 临时密钥加密。
 	if username != "admin" {
 		checkURL := fmt.Sprintf("%s://%s:%d/ugreen/v1/verify/check", protocol, ip, port)
 		checkReqBody, _ := json.Marshal(map[string]string{"username": username})
@@ -714,7 +873,6 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 
 	pubKeyBytes, _ := base64.StdEncoding.DecodeString(loginResp.Data.PublicKey)
 
-	// 源码对齐：Cookie 的 Domain 作用域必须明确带上 /ugreen/ 路径
 	u, _ := url.Parse(fmt.Sprintf("%s://%s:%d/ugreen/", protocol, ip, port))
 	var cookiePairs []string
 	for _, c := range jar.Cookies(u) {

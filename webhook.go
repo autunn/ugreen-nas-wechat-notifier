@@ -152,21 +152,21 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 			case "GET_UGREEN_INFO":
 				go PushUGreenSystemStatus()
 			case "GET_UGREEN_STORAGE":
-				go PushUGreenStorageStatus()
+				go PushUGreenStorageStatus() // 已经更新为新的接口
 			case "GET_UGREEN_UPS":
-				go WechatPush("🚧 [UPS电源] 功能暂未接入。")
+				go PushUGreenUpsStatus() // 已经解除了暂未接入的封印，真正去请求 UPS
 
 			// 🛠️ 服务类
 			case "GET_UGREEN_DOCKER":
-				go PushUGreenDockerStatus() // 替换为真实的 Docker 状态推送
+				go PushUGreenDockerStatus()
 			case "GET_UGREEN_PS":
-				go PushUGreenPsStatus() // 替换为真实的进程列表推送
+				go PushUGreenPsStatus()
 			case "GET_UGREEN_BACKUP":
-				go PushUGreenBackupStatus() // 替换为真实的备份任务推送
+				go PushUGreenBackupStatus()
 
 			// ⚙️ 控制类
 			case "GET_UGREEN_POWER":
-				go PushUGreenPowerStatus() // 替换为真实的电源配置推送
+				go PushUGreenPowerStatus()
 			case "GET_UGREEN_NOTIFY":
 				go PushUGreenNotifyStatus()
 			case "GET_UGREEN_PERF":
