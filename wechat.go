@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,6 +17,30 @@ var (
 	wechatAccessTokenExpiresAt int64
 )
 
+// ==================== 新增：企业微信 XML 数据结构 ====================
+
+// WeChatXMLMsg 接收企业微信推送的加密 XML 数据
+type WeChatXMLMsg struct {
+	XMLName    xml.Name `xml:"xml"`
+	ToUserName string   `xml:"ToUserName"`
+	AgentID    string   `xml:"AgentID"`
+	Encrypt    string   `xml:"Encrypt"`
+}
+
+// WeChatPlainMsg 解密后的明文 XML 结构 (包含事件与普通消息)
+type WeChatPlainMsg struct {
+	XMLName      xml.Name `xml:"xml"`
+	ToUserName   string   `xml:"ToUserName"`
+	FromUserName string   `xml:"FromUserName"`
+	CreateTime   int64    `xml:"CreateTime"`
+	MsgType      string   `xml:"MsgType"`
+	Event        string   `xml:"Event"`
+	EventKey     string   `xml:"EventKey"`
+	Content      string   `xml:"Content"`
+}
+
+// ==================== 现有与新增业务逻辑 ====================
+
 // getWeChatToken 获取企业微信 Token (支持代理)
 func getWeChatToken(baseURL string) string {
 	CfgMu.RLock()
@@ -27,7 +52,6 @@ func getWeChatToken(baseURL string) string {
 		return ""
 	}
 
-	// 判断 Token 是否有效
 	if wechatAccessToken != "" && wechatAccessTokenExpiresAt > time.Now().Unix() {
 		return wechatAccessToken
 	}
@@ -54,12 +78,11 @@ func getWeChatToken(baseURL string) string {
 	}
 
 	wechatAccessToken = res.Token
-	// 提前一分钟过期，防止边界失效
 	wechatAccessTokenExpiresAt = time.Now().Unix() + res.Exp - 60
 	return wechatAccessToken
 }
 
-// WechatPush 发送通知 (升级为图文卡片)
+// WechatPush 发送通知 (图文卡片)
 func WechatPush(content string) {
 	CfgMu.RLock()
 	agentIDStr := Config.AgentID
@@ -68,13 +91,11 @@ func WechatPush(content string) {
 	nasURL := Config.NasURL
 	CfgMu.RUnlock()
 
-	// 1. 处理代理地址
 	baseURL := "https://qyapi.weixin.qq.com"
 	if proxyURL != "" {
 		baseURL = strings.TrimRight(proxyURL, "/")
 	}
 
-	// 2. 获取 Token
 	token := getWeChatToken(baseURL)
 	if token == "" {
 		log.Println("推送失败：未获取到有效的 AccessToken")
@@ -83,7 +104,6 @@ func WechatPush(content string) {
 
 	url := fmt.Sprintf("%s/cgi-bin/message/send?access_token=%s", baseURL, token)
 
-	// 3. 处理图片 URL (加入防缓存机制与默认兜底)
 	picURL := photoURL
 	if picURL == "" {
 		picURL = fmt.Sprintf("https://api.vvhan.com/api/wallpaper/acg?rand=%d", time.Now().UnixNano())
@@ -95,7 +115,6 @@ func WechatPush(content string) {
 		picURL = fmt.Sprintf("%s%sv=%d", picURL, connector, time.Now().UnixNano())
 	}
 
-	// 4. 类型转换与 Payload 组装 (图文卡片)
 	agentID, _ := strconv.Atoi(agentIDStr)
 	payload := map[string]interface{}{
 		"touser":  "@all",
@@ -121,8 +140,62 @@ func WechatPush(content string) {
 	}
 	defer resp.Body.Close()
 
-	// 打印 API 返回结果，帮助定位问题
 	var result map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&result)
-	log.Printf("企业微信推送响应: %v\n", result)
+	// 只有在发送失败时才打印日志，避免日常日志过多
+	if errcode, ok := result["errcode"].(float64); ok && errcode != 0 {
+		log.Printf("企业微信推送失败: %v\n", result)
+	}
+}
+
+// CreateWechatMenu 自动调用官方 API 创建底部菜单
+func CreateWechatMenu() {
+	CfgMu.RLock()
+	agentIDStr := Config.AgentID
+	proxyURL := Config.ProxyURL
+	CfgMu.RUnlock()
+
+	if agentIDStr == "" {
+		return // 配置不完整则跳过
+	}
+
+	baseURL := "https://qyapi.weixin.qq.com"
+	if proxyURL != "" {
+		baseURL = strings.TrimRight(proxyURL, "/")
+	}
+
+	token := getWeChatToken(baseURL)
+	if token == "" {
+		return
+	}
+
+	url := fmt.Sprintf("%s/cgi-bin/menu/create?access_token=%s&agentid=%s", baseURL, token, agentIDStr)
+
+	// 定义菜单结构：一个名为“获取状态”的点击按钮，EventKey 为 GET_UGREEN_STATUS
+	payload := map[string]interface{}{
+		"button": []map[string]interface{}{
+			{
+				"type": "click",
+				"name": "获取绿联状态",
+				"key":  "GET_UGREEN_STATUS",
+			},
+		},
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("创建微信菜单请求失败: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if errcode, ok := result["errcode"].(float64); ok && errcode == 0 {
+		log.Println("✅ 企业微信自定义菜单自动创建/更新成功！")
+	} else {
+		log.Printf("⚠️ 企业微信菜单创建失败: %v\n", result)
+	}
 }

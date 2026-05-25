@@ -32,19 +32,25 @@ func main() {
 	// 2. 在后台独立协程中启动 NAS 轮询任务
 	go runTasksLoop()
 
+	// 启动整点状态报告任务
+	go runHourlyTasksLoop()
+
+	// === 新增：程序启动 5 秒后，自动尝试创建/更新一次企业微信自建应用菜单 ===
+	go func() {
+		time.Sleep(5 * time.Second)
+		CreateWechatMenu()
+	}()
+
 	// 3. 启动 Web 路由服务
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
 	// 加载静态文件与模板
 	r.LoadHTMLGlob("templates/*")
-	// 如果本地有 logo.png 也可以直接放开这行，和 NasWebhook 保持一致
-	// r.StaticFile("/logo.png", "./logo.png")
 
-	// === 新增：企业微信回调与通用 Webhook 接收 ===
+	// 企业微信回调与通用 Webhook 接收
 	r.GET("/wx-receive", handleVerify)
 	r.POST("/wx-receive", handleMessage)
-	// ===========================================
 
 	// --- 路由配置 ---
 
@@ -91,13 +97,12 @@ func main() {
 			CfgMu.RUnlock()
 
 			c.HTML(http.StatusOK, "index.html", gin.H{
-				// 使用 template.JS 包装，原样输出 JSON 给前端 JavaScript
 				"configJson": template.JS(configJsonBytes),
 				"success":    c.Query("success") == "true",
 				"version":    Version,
 			})
 		})
-		// 增加一个触发测试推送的 API 接口
+		// 触发测试推送的 API 接口
 		auth.GET("/test-push", func(c *gin.Context) {
 			go WechatPush("🔔 测试通知\n\n这是一条来自 NasNotify 的测试消息！如果您收到此消息，说明企业微信推送配置已完全正确。")
 			c.JSON(http.StatusOK, gin.H{"success": true, "msg": "测试请求已触发"})
@@ -115,6 +120,10 @@ func main() {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "保存失败"})
 				return
 			}
+
+			// === 新增：保存新配置后，异步重新同步一次企业微信菜单 ===
+			go CreateWechatMenu()
+
 			c.JSON(http.StatusOK, gin.H{"status": "ok"})
 		})
 	}
@@ -122,7 +131,7 @@ func main() {
 	log.Printf("=================================================")
 	log.Printf("聚合通知中心 %s 已启动！", Version)
 	log.Printf("Web 控制台地址: http://localhost:5080")
-	log.Printf("企业微信 Webhook 接收地址: http://你的外网IP或域名:5080/webhook")
+	log.Printf("企业微信 Webhook 接收地址: http://你的外网IP或域名:5080/wx-receive")
 	log.Printf("=================================================")
 	r.Run(":5080")
 }
@@ -145,9 +154,8 @@ func checkCookie(c *gin.Context) bool {
 	return err == nil && cookie == sessionToken
 }
 
-// runTasksLoop 轮询任务
+// runTasksLoop 常规轮询任务（处理系统通知与离线告警）
 func runTasksLoop() {
-	// 等待 2 秒让 Web 服务先完全启动
 	time.Sleep(2 * time.Second)
 
 	for {
@@ -165,5 +173,23 @@ func runTasksLoop() {
 		ProcessFnOs()
 
 		time.Sleep(time.Duration(interval * float64(time.Minute)))
+	}
+}
+
+// runHourlyTasksLoop 独立协程处理整点任务
+func runHourlyTasksLoop() {
+	time.Sleep(3 * time.Second)
+
+	for {
+		now := time.Now()
+		nextHour := now.Truncate(time.Hour).Add(time.Hour)
+		waitDuration := time.Until(nextHour)
+
+		log.Printf("⏳ 状态报告任务已就绪，将在 %v 后 (即 %s) 准时执行\n", waitDuration.Round(time.Second), nextHour.Format("15:04:05"))
+
+		time.Sleep(waitDuration)
+
+		log.Println("--- ⏰ 触发整点系统状态推送任务 ---")
+		PushUGreenSystemStatus()
 	}
 }
