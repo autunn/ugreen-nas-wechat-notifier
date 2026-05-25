@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>配置 - 聚合通知中心</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { background: #f4f6f9; font-family: -apple-system, sans-serif; display: flex; justify-content: center; margin: 0; padding: 20px; box-sizing: border-box; }
+        .container { background: white; padding: 30px; border-radius: 12px; width: 100%; max-width: 600px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); position: relative; }
+        .header { display: flex; align-items: center; gap: 8px; margin-bottom: 25px; border-bottom: 1px solid #f1f5f9; padding-bottom: 15px; }
+        .logo { height: 1.2em; width: 1.2em; object-fit: contain; border-radius: 4px; }
+        h2 { margin: 0; font-size: 1.4rem; color: #1e293b; }
+        .logout { position: absolute; top: 30px; right: 30px; color: #ef4444; text-decoration: none; font-size: 14px; font-weight: 600; }
+        .group { margin-bottom: 15px; }
+        label { display: block; font-size: 13px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
+        input[type="text"], input[type="password"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+        button { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 20px; font-size: 16px; }
+        button:hover { background: #1d4ed8; }
+        .success-msg { background: #dcfce7; color: #166534; padding: 12px; border-radius: 6px; margin-bottom: 20px; text-align: center; font-size: 14px; }
+        .section-title { margin-top: 30px; margin-bottom: 15px; font-size: 16px; color: #0f172a; border-left: 4px solid #2563eb; padding-left: 8px; }
+        .switch-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-weight: bold; color: #1e293b; cursor: pointer; padding: 10px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0; }
+        .nas-form { display: none; padding: 15px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 6px 6px; margin-top: -10px; margin-bottom: 15px; background: #fafafa; }
+        .nas-form.active { display: block; }
+        .inline-check { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: normal; color: #475569; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/logout" class="logout">退出 ⏻</a>
+        <div class="header">
+            <h2>设置面板</h2>
+        </div>
+        {{if .success}}<div class="success-msg">✅ 配置已成功保存！</div>{{end}}
+        
+        <form id="configForm">
+            <div class="section-title">系统基础配置</div>
+            <div class="group"><label>后台登录密码</label><input type="text" id="admin_password" required></div>
+            <div class="group"><label>轮询间隔 (分钟)</label><input type="number" id="interval_minutes" step="0.1" required></div>
+            
+            <div class="section-title">企业微信参数</div>
+            <div class="group"><label>CorpID</label><input type="text" id="corpid"></div>
+            <div class="group"><label>AgentID</label><input type="text" id="agentid"></div>
+            <div class="group"><label>CorpSecret</label><input type="password" id="corpsecret"></div>
+            <div class="group"><label>Token</label><input type="text" id="token"></div>
+            <div class="group"><label>EncodingAESKey</label><input type="text" id="encoding_aes_key"></div>
+            <div class="group"><label>NAS 跳转地址 (NasURL)</label><input type="text" id="nas_url"></div>
+            <div class="group"><label>自定义图片 API (PhotoURL)</label><input type="text" id="photo_url"></div>
+            <div class="group"><label>代理地址 (ProxyURL)</label><input type="text" id="proxy_url"></div>
+
+            <div class="section-title">主动抓取：NAS 节点配置</div>
+            
+            <label class="switch-row"><input type="checkbox" id="enable_zspace" onchange="toggleForm('form_zspace', this.checked)">启用极空间 (ZSpace)</label>
+            <div id="form_zspace" class="nas-form">
+                <div class="group"><label>设备 IP:端口</label><input type="text" id="zs_ip"></div>
+                <div class="group"><label>Cookie</label><input type="text" id="zs_cookie"></div>
+                <div class="group"><label>标识名称</label><input type="text" id="zs_name"></div>
+                <label class="inline-check"><input type="checkbox" id="zs_ssl"> 使用 HTTPS</label>
+            </div>
+
+            <label class="switch-row"><input type="checkbox" id="enable_ugreen" onchange="toggleForm('form_ugreen', this.checked)">启用绿联 (UGreen)</label>
+            <div id="form_ugreen" class="nas-form">
+                <div class="group"><label>IP:端口</label><input type="text" id="ug_ip"></div>
+                <div class="group"><label>账号</label><input type="text" id="ug_user"></div>
+                <div class="group"><label>密码</label><input type="password" id="ug_pass"></div>
+                <div class="group"><label>标识名称</label><input type="text" id="ug_name"></div>
+                <label class="inline-check"><input type="checkbox" id="ug_ssl"> 使用 HTTPS</label>
+            </div>
+
+            <label class="switch-row"><input type="checkbox" id="enable_fnos" onchange="toggleForm('form_fnos', this.checked)">启用飞牛 (FnOS)</label>
+            <div id="form_fnos" class="nas-form">
+                <div class="group"><label>IP:端口</label><input type="text" id="fn_ip"></div>
+                <div class="group"><label>账号</label><input type="text" id="fn_user"></div>
+                <div class="group"><label>密码</label><input type="password" id="fn_pass"></div>
+                <div class="group"><label>标识名称</label><input type="text" id="fn_name"></div>
+                <label class="inline-check"><input type="checkbox" id="fn_ssl"> 使用 HTTPS</label>
+            </div>
+            <button type="button" id="testPushBtn" onclick="sendTestPush()">发送测试通知</button>
+            <button type="button" onclick="saveConfig()">💾 保存并应用</button>
+        </form>
+        
+        <div style="text-align: center; font-size: 11px; color: #cbd5e1; margin-top: 25px; font-family: monospace;">{{.version}}</div>
+    </div>
+
+    <script>
+        const rawConfig = {{.configJson}};
+        function toggleForm(id, show) { document.getElementById(id).classList.toggle('active', show); }
+        window.onload = function() {
+            document.getElementById('admin_password').value = rawConfig.admin_password || 'admin';
+            document.getElementById('interval_minutes').value = rawConfig.interval_minutes || 5;
+            document.getElementById('corpid').value = rawConfig.corpid || '';
+            document.getElementById('agentid').value = rawConfig.agentid || '';
+            document.getElementById('corpsecret').value = rawConfig.corpsecret || '';
+            document.getElementById('token').value = rawConfig.token || '';
+            document.getElementById('encoding_aes_key').value = rawConfig.encoding_aes_key || '';
+            document.getElementById('nas_url').value = rawConfig.nas_url || '';
+            document.getElementById('photo_url').value = rawConfig.photo_url || '';
+            document.getElementById('proxy_url').value = rawConfig.proxy_url || '';
+            
+            if(rawConfig.zspace?.length){
+                document.getElementById('enable_zspace').checked = true; toggleForm('form_zspace', true);
+                document.getElementById('zs_ip').value = rawConfig.zspace[0].ip_port;
+                document.getElementById('zs_cookie').value = rawConfig.zspace[0].cookie;
+                document.getElementById('zs_name').value = rawConfig.zspace[0].notify_type_name;
+                document.getElementById('zs_ssl').checked = rawConfig.zspace[0].use_ssl;
+            }
+            if(rawConfig.ugreen?.length){
+                document.getElementById('enable_ugreen').checked = true; toggleForm('form_ugreen', true);
+                document.getElementById('ug_ip').value = rawConfig.ugreen[0].ip_port;
+                document.getElementById('ug_user').value = rawConfig.ugreen[0].username;
+                document.getElementById('ug_pass').value = rawConfig.ugreen[0].password;
+                document.getElementById('ug_name').value = rawConfig.ugreen[0].notify_type_name;
+                document.getElementById('ug_ssl').checked = rawConfig.ugreen[0].use_ssl;
+            }
+            if(rawConfig.fnos?.length){
+                document.getElementById('enable_fnos').checked = true; toggleForm('form_fnos', true);
+                document.getElementById('fn_ip').value = rawConfig.fnos[0].server;
+                document.getElementById('fn_user').value = rawConfig.fnos[0].username;
+                document.getElementById('fn_pass').value = rawConfig.fnos[0].password;
+                document.getElementById('fn_name').value = rawConfig.fnos[0].notify_type_name;
+                document.getElementById('fn_ssl').checked = rawConfig.fnos[0].use_ssl;
+            }
+        };
+        function saveConfig() {
+            const data = {
+                admin_password: document.getElementById('admin_password').value,
+                interval_minutes: parseFloat(document.getElementById('interval_minutes').value),
+                corpid: document.getElementById('corpid').value,
+                agentid: document.getElementById('agentid').value,
+                corpsecret: document.getElementById('corpsecret').value,
+                token: document.getElementById('token').value,
+                encoding_aes_key: document.getElementById('encoding_aes_key').value,
+                nas_url: document.getElementById('nas_url').value,
+                photo_url: document.getElementById('photo_url').value,
+                proxy_url: document.getElementById('proxy_url').value,
+                zspace: document.getElementById('enable_zspace').checked ? [{ip_port: document.getElementById('zs_ip').value, cookie: document.getElementById('zs_cookie').value, notify_type_name: document.getElementById('zs_name').value, use_ssl: document.getElementById('zs_ssl').checked}] : [],
+                ugreen: document.getElementById('enable_ugreen').checked ? [{ip_port: document.getElementById('ug_ip').value, username: document.getElementById('ug_user').value, password: document.getElementById('ug_pass').value, notify_type_name: document.getElementById('ug_name').value, use_ssl: document.getElementById('ug_ssl').checked}] : [],
+                fnos: document.getElementById('enable_fnos').checked ? [{server: document.getElementById('fn_ip').value, username: document.getElementById('fn_user').value, password: document.getElementById('fn_pass').value, notify_type_name: document.getElementById('fn_name').value, use_ssl: document.getElementById('fn_ssl').checked}] : []
+            };
+            fetch('/save', {method: 'POST', body: JSON.stringify(data)}).then(() => window.location.href='/?success=true');
+        }
+        
+    </script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+var (
+	// deviceOfflineCount 记录设备连续离线的次数
+	deviceOfflineCount = make(map[string]int)
+	// deviceOfflineMu 保证并发读写的安全
+	deviceOfflineMu sync.Mutex
+)
+
+// SplitIpPort 拆分 IP 和端口
+func SplitIpPort(ipPort string, defaultPort int) (string, int) {
+	parts := strings.Split(ipPort, ":")
+	ip := parts[0]
+	port := defaultPort
+	if len(parts) > 1 {
+		if p, err := strconv.Atoi(parts[1]); err == nil {
+			port = p
+		}
+	}
+	return ip, port
+}
+
+// CheckPortOpen 检查设备端口是否开放 (超时时间 2 秒)
+func CheckPortOpen(ip string, port int) bool {
+	address := net.JoinHostPort(ip, strconv.Itoa(port))
+	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+	if err != nil {
+		return false
+	}
+	if conn != nil {
+		conn.Close()
+		return true
+	}
+	return false
+}
+
+// HandleDeviceStatus 统一处理设备在线/离线状态与微信推送逻辑
+func HandleDeviceStatus(deviceType, deviceName, ip string, port int) bool {
+	if deviceName == "" {
+		deviceName = "未命名设备"
+	}
+
+	// 生成设备的唯一标识 Key
+	deviceKey := fmt.Sprintf("%s_%s_%s:%d", deviceType, deviceName, ip, port)
+	isOpen := CheckPortOpen(ip, port)
+
+	deviceOfflineMu.Lock()
+	defer deviceOfflineMu.Unlock()
+
+	// 1. 如果设备在线
+	if isOpen {
+		// 检查之前是否有离线记录，如果有，则重置为 0 并发送恢复通知
+		if count, exists := deviceOfflineCount[deviceKey]; exists && count > 0 {
+			log.Printf("[%s] %s (%s:%d) 已恢复在线", deviceType, deviceName, ip, port)
+			deviceOfflineCount[deviceKey] = 0
+
+			recoveryMsg := fmt.Sprintf("✅ 设备恢复在线\n\n设备类型: %s\n设备名称: %s\n地址: %s:%d", deviceType, deviceName, ip, port)
+			go WechatPush(recoveryMsg)
+		}
+		return true
+	}
+
+	// 2. 如果设备离线，累加计数器
+	deviceOfflineCount[deviceKey]++
+	count := deviceOfflineCount[deviceKey]
+
+	// 3. 判断是否需要发送告警
+	if count <= 3 {
+		log.Printf("[%s] %s (%s:%d) 离线，正在发送第 %d/3 次告警\n", deviceType, deviceName, ip, port, count)
+		msg := fmt.Sprintf("⚠️ 设备离线告警\n\n设备类型: %s\n设备名称: %s\n地址: %s:%d\n(连续告警第 %d/3 次)", deviceType, deviceName, ip, port, count)
+		go WechatPush(msg)
+	} else {
+		log.Printf("[%s] %s (%s:%d) 离线，已超过 3 次告警限制，静默处理\n", deviceType, deviceName, ip, port)
+	}
+
+	return false
+}

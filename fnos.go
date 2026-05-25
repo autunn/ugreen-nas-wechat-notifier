@@ -1,0 +1,356 @@
+package main
+
+import (
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"log"
+	"math/rand"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+// fnOs 专用的时间格式
+const fnosTimeFormat = "2006-01-02T15:04:05Z"
+
+// FnOsClient 飞牛 WebSocket 客户端
+type FnOsClient struct {
+	conn     *websocket.Conn
+	pub      string
+	si       string
+	aesKey   string
+	iv       []byte
+	backId   string
+	signKey  string
+	reqIndex int
+	pending  map[string]chan map[string]interface{}
+	mu       sync.Mutex
+}
+
+// ProcessFnOs 飞牛任务主函数
+func ProcessFnOs() {
+	if len(Config.FnOs) == 0 {
+		return
+	}
+
+	for _, config := range Config.FnOs {
+		ip, port := SplitIpPort(config.Server, 5666)
+		if !HandleDeviceStatus("飞牛", config.NotifyTypeName, ip, port) {
+			continue
+		}
+
+		logFile := filepath.Join("data", "log", fmt.Sprintf("%s_%d.log", ip, port))
+
+		client := NewFnOsClient()
+		err := client.Connect(config.Server, config.UseSSL, config.Cookie)
+		if err != nil {
+			log.Printf("[飞牛] 连接失败: %v\n", err)
+			continue
+		}
+
+		// 1. 获取公钥
+		err = client.GetRSAPub()
+		if err != nil {
+			log.Printf("[飞牛] 获取公钥失败: %v\n", err)
+			client.Close()
+			continue
+		}
+
+		// 2. 登录鉴权
+		err = client.Login(config.Username, config.Password)
+		if err != nil {
+			log.Printf("[飞牛] 登录失败: %v\n", err)
+			client.Close()
+			continue
+		}
+
+		// 3. 获取通知列表
+		resp, err := client.Request("notify.list", map[string]interface{}{"page": 1, "lastId": 0})
+		client.Close() // 拿完数据就可以断开连接了
+
+		if err != nil {
+			log.Printf("[飞牛] 获取通知失败: %v\n", err)
+			continue
+		}
+
+		notifyListInterface, ok := resp["notifyList"].([]interface{})
+		if !ok {
+			log.Printf("[飞牛] 通知列表解析失败\n")
+			continue
+		}
+
+		// 4. 比对本地时间戳并过滤新消息
+		lastTime := getLastFnOsTime(logFile)
+		var newNotices []map[string]interface{}
+
+		for _, item := range notifyListInterface {
+			notice := item.(map[string]interface{})
+			if dtStr, ok := notice["datetime"].(string); ok {
+				t, _ := time.Parse(fnosTimeFormat, dtStr)
+				if t.After(lastTime) {
+					newNotices = append(newNotices, notice)
+				}
+			}
+		}
+
+		// 5. 排序、保存并推送
+		if len(newNotices) > 0 {
+			// 按时间升序排序，保证写入日志顺序正确
+			sort.Slice(newNotices, func(i, j int) bool {
+				t1, _ := time.Parse(fnosTimeFormat, newNotices[i]["datetime"].(string))
+				t2, _ := time.Parse(fnosTimeFormat, newNotices[j]["datetime"].(string))
+				return t1.Before(t2)
+			})
+
+			fileInfo, err := os.Stat(logFile)
+			isFirstRun := os.IsNotExist(err) || fileInfo.Size() == 0
+
+			if isFirstRun && len(newNotices) > 10 {
+				newNotices = newNotices[len(newNotices)-10:] // 首次最多推 10 条
+			}
+
+			saveFnOsNotices(newNotices, logFile)
+			pushContent := buildFnOsPushContent(newNotices, config.NotifyTypeName)
+			if pushContent != "" {
+				WechatPush(pushContent)
+				log.Printf("[飞牛] 发现 %d 条新通知并已推送\n", len(newNotices))
+			}
+		} else {
+			log.Printf("[飞牛] %s 没有新的通知\n", config.NotifyTypeName)
+		}
+	}
+}
+
+// ----------------- WebSocket 核心逻辑 -----------------
+
+func NewFnOsClient() *FnOsClient {
+	return &FnOsClient{
+		backId:  "0000000000000000",
+		pending: make(map[string]chan map[string]interface{}),
+	}
+}
+
+func (c *FnOsClient) Connect(server string, useSSL bool, cookie string) error {
+	protocol := "ws"
+	if useSSL {
+		protocol = "wss"
+	}
+	u := fmt.Sprintf("%s://%s/websocket?type=main", protocol, server)
+
+	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	header := http.Header{}
+	if cookie != "" {
+		header.Set("Cookie", cookie)
+	} else if useSSL {
+		header.Set("Cookie", "mode=relay; language=zh")
+	}
+
+	conn, _, err := dialer.Dial(u, header)
+	if err != nil {
+		return err
+	}
+	c.conn = conn
+
+	// 启动读取协程
+	go c.readLoop()
+	return nil
+}
+
+func (c *FnOsClient) readLoop() {
+	for {
+		_, message, err := c.conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var data map[string]interface{}
+		if err := json.Unmarshal(message, &data); err == nil {
+			if reqid, ok := data["reqid"].(string); ok {
+				c.mu.Lock()
+				if ch, exists := c.pending[reqid]; exists {
+					ch <- data
+					delete(c.pending, reqid)
+				}
+				c.mu.Unlock()
+			}
+		}
+	}
+}
+
+func (c *FnOsClient) Close() {
+	if c.conn != nil {
+		c.conn.Close()
+	}
+}
+
+func (c *FnOsClient) generateReqId() string {
+	c.reqIndex++
+	ts := fmt.Sprintf("%08x", time.Now().Unix())
+	idx := fmt.Sprintf("%04x", c.reqIndex)
+	return ts + c.backId + idx
+}
+
+func (c *FnOsClient) Request(reqType string, params map[string]interface{}) (map[string]interface{}, error) {
+	reqid := c.generateReqId()
+
+	payload := map[string]interface{}{
+		"req":   reqType,
+		"reqid": reqid,
+	}
+	for k, v := range params {
+		payload[k] = v
+	}
+
+	// 针对登录进行特殊加密
+	if reqType == "user.login" {
+		jsonData, _ := json.Marshal(payload)
+
+		// RSA 加密 AES 密钥
+		rsaEnc, _ := RsaEncrypt(c.pub, c.aesKey)
+		// AES 加密 Payload
+		aesEnc, _ := AesEncrypt(string(jsonData), c.aesKey, c.iv)
+
+		payload = map[string]interface{}{
+			"req":   "encrypted",
+			"reqid": reqid, // 透传 reqid 方便路由
+			"iv":    base64.StdEncoding.EncodeToString(c.iv),
+			"rsa":   rsaEnc,
+			"aes":   aesEnc,
+		}
+	}
+
+	var messageStr string
+	jsonStr, _ := json.Marshal(payload)
+
+	// 需要签名的请求
+	if reqType != "encrypted" && reqType != "util.crypto.getRSAPub" && c.signKey != "" {
+		sig, _ := GetSignature(string(jsonStr), c.signKey)
+		messageStr = sig + string(jsonStr)
+	} else {
+		messageStr = string(jsonStr)
+	}
+
+	ch := make(chan map[string]interface{}, 1)
+	c.mu.Lock()
+	c.pending[reqid] = ch
+	c.mu.Unlock()
+
+	c.conn.WriteMessage(websocket.TextMessage, []byte(messageStr))
+
+	select {
+	case resp := <-ch:
+		if errVal, ok := resp["errno"]; ok && errVal != nil {
+			return nil, fmt.Errorf("服务器返回错误码: %v", errVal)
+		}
+		return resp, nil
+	case <-time.After(10 * time.Second):
+		c.mu.Lock()
+		delete(c.pending, reqid)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("请求超时: %s", reqType)
+	}
+}
+
+func (c *FnOsClient) GetRSAPub() error {
+	resp, err := c.Request("util.crypto.getRSAPub", nil)
+	if err != nil {
+		return err
+	}
+	c.pub = resp["pub"].(string)
+	c.si = resp["si"].(string)
+	return nil
+}
+
+func (c *FnOsClient) Login(username, password string) error {
+	c.aesKey = generateRandomString(32)
+	c.iv = make([]byte, 16)
+	rand.Read(c.iv)
+
+	resp, err := c.Request("user.login", map[string]interface{}{
+		"user":       username,
+		"password":   password,
+		"stay":       true,
+		"deviceType": "Browser",
+		"deviceName": "fnos-go-auth",
+		"si":         c.si,
+	})
+	if err != nil {
+		return err
+	}
+
+	if bid, ok := resp["backId"].(string); ok {
+		c.backId = bid
+	}
+	if sec, ok := resp["secret"].(string); ok {
+		c.signKey, _ = AesDecrypt(sec, c.aesKey, c.iv)
+	}
+	return nil
+}
+
+// ----------------- 辅助与文件方法 -----------------
+
+func generateRandomString(n int) string {
+	const letters = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
+func getLastFnOsTime(file string) time.Time {
+	content, err := os.ReadFile(file)
+	if err != nil {
+		return time.Time{}
+	}
+	lines := strings.Split(string(content), "\n")
+	var maxTime time.Time
+	for _, line := range lines {
+		parts := strings.SplitN(line, "：", 2)
+		if len(parts) == 2 {
+			if t, err := time.ParseInLocation("2006-01-02 15:04:05", strings.TrimSpace(parts[0]), time.Local); err == nil {
+				if t.After(maxTime) {
+					maxTime = t
+				}
+			}
+		}
+	}
+	return maxTime
+}
+
+func saveFnOsNotices(notices []map[string]interface{}, file string) {
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	for _, notice := range notices {
+		dtStr := notice["datetime"].(string)
+		content := notice["content"].(string)
+
+		t, _ := time.Parse(fnosTimeFormat, dtStr)
+		// 飞牛接口返回的是 UTC 时间，转成本地（北京）时间记录
+		localTime := t.In(time.FixedZone("CST", 8*3600))
+		f.WriteString(fmt.Sprintf("%s：%s\n", localTime.Format("2006-01-02 15:04:05"), content))
+	}
+}
+
+func buildFnOsPushContent(notices []map[string]interface{}, typeName string) string {
+	if len(notices) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("%s消息通知（共%d条）", typeName, len(notices)))
+	for i, notice := range notices {
+		builder.WriteString(fmt.Sprintf("\n\n%d. %s", i+1, notice["content"].(string)))
+	}
+	return builder.String()
+}
