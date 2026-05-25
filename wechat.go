@@ -192,27 +192,9 @@ func CreateWechatMenu() {
 
 	var result map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&result)
-	
+
 	if errcode, ok := result["errcode"].(float64); ok && errcode == 0 {
 		log.Println("✅ 企业微信自定义菜单自动创建成功！")
-	} else {
-		log.Printf("⚠️ 企业微信菜单创建失败: %v\n", result)
-	}
-}
-
-	jsonData, _ := json.Marshal(payload)
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		log.Printf("创建微信菜单请求失败: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	if errcode, ok := result["errcode"].(float64); ok && errcode == 0 {
-		log.Println("✅ 企业微信自定义菜单自动创建/更新成功！")
 	} else {
 		log.Printf("⚠️ 企业微信菜单创建失败: %v\n", result)
 	}
