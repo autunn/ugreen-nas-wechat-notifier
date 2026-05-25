@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -44,7 +43,6 @@ type UGreenLoginResp struct {
 	} `json:"data"`
 }
 
-// UGreenSystemInfo 汇总所有监控数据
 type UGreenSystemInfo struct {
 	UsageCpu    float64 `json:"usageCpu"`
 	CpuTemp     float64 `json:"cpuTemp"`
@@ -94,9 +92,8 @@ type UGreenStorageItem struct {
 	NotifyPct   int    `json:"capacity_notify_percentage"`
 }
 
-// ==================== 核心业务逻辑 ====================
+// ==================== 核心与菜单触发业务 ====================
 
-// ProcessUGreen 绿联常规通知增量同步任务
 func ProcessUGreen() {
 	if len(Config.UGreen) == 0 {
 		return
@@ -114,16 +111,13 @@ func ProcessUGreen() {
 		if authInfo == nil {
 			newAuth, err := loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
 			if err != nil {
-				log.Printf("[绿联] 登录失败: %v\n", err)
 				continue
 			}
 			authInfo = newAuth
 		}
 
 		notices, code, err := fetchUGreenNotices(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL)
-
 		if err == nil && code != 200 {
-			log.Println("[绿联] Token 失效，正在重新鉴权...")
 			authInfo, err = loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
 			if err == nil {
 				notices, _, err = fetchUGreenNotices(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL)
@@ -131,13 +125,11 @@ func ProcessUGreen() {
 		}
 
 		if err != nil {
-			log.Printf("[绿联] 获取通知失败: %v\n", err)
 			continue
 		}
 
 		lastTime := getLastUGreenTime(logFile)
 		var newNotices []UGreenNotice
-
 		for _, notice := range notices {
 			if notice.Time > lastTime {
 				newNotices = append(newNotices, notice)
@@ -152,70 +144,177 @@ func ProcessUGreen() {
 			pushContent := buildUGreenPushContent(newNotices, config.NotifyTypeName)
 			if pushContent != "" {
 				WechatPush(pushContent)
-				log.Println("[绿联] 新增通知 (首次生成)")
 			}
 		} else if len(newNotices) > 0 {
 			saveUGreenNotices(newNotices, logFile)
 			pushContent := buildUGreenPushContent(newNotices, config.NotifyTypeName)
 			if pushContent != "" {
 				WechatPush(pushContent)
-				log.Println("[绿联] 清空文件，新增通知")
 			}
-		} else {
-			log.Printf("[绿联] %s 没有新的通知\n", config.NotifyTypeName)
 		}
 	}
 }
 
-// PushUGreenSystemStatus 主动获取绿联系统状态并向微信推送报告
+// PushUGreenSystemStatus 菜单触发：系统概览
 func PushUGreenSystemStatus() {
 	if len(Config.UGreen) == 0 {
 		return
 	}
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+	if authInfo == nil {
+		return
+	}
 
-	for _, config := range Config.UGreen {
-		ip, port := SplitIpPort(config.IpPort, 9999)
-		authInfo := loadUGreenAuthInfo(ip, port)
+	info, err := fetchUGreenSystemInfo(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL)
+	if err != nil {
+		authInfo = ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+		info, _ = fetchUGreenSystemInfo(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL)
+	}
 
-		if authInfo == nil {
-			newAuth, err := loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
-			if err != nil {
-				log.Printf("[绿联] 主动推送状态失败 (登录失败): %v\n", err)
-				continue
+	pushContent := buildUGreenSystemStatusPushContent(info, config.NotifyTypeName)
+	if pushContent != "" {
+		WechatPush(pushContent)
+	}
+}
+
+// PushUGreenStorageStatus 菜单触发：独立存储状态
+func PushUGreenStorageStatus() {
+	if len(Config.UGreen) == 0 {
+		return
+	}
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+	if authInfo == nil {
+		return
+	}
+
+	info, _ := fetchUGreenSystemInfo(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL)
+	if info != nil && len(info.Storage) > 0 {
+		var builder strings.Builder
+		builder.WriteString(fmt.Sprintf("💾 %s 存储卷状态详情\n", config.NotifyTypeName))
+		builder.WriteString(strings.Repeat("-", 22) + "\n")
+		for _, storage := range info.Storage {
+			var usedStr, totalStr string
+			if storage.Size > 1024*1024*1024*1024 {
+				usedStr = fmt.Sprintf("%.2f TB", float64(storage.Used)/1024/1024/1024/1024)
+				totalStr = fmt.Sprintf("%.2f TB", float64(storage.Size)/1024/1024/1024/1024)
+			} else {
+				usedStr = fmt.Sprintf("%.2f GB", float64(storage.Used)/1024/1024/1024)
+				totalStr = fmt.Sprintf("%.2f GB", float64(storage.Size)/1024/1024/1024)
 			}
-			authInfo = newAuth
+			usagePct := float64(storage.Used) / float64(storage.Size) * 100
+			builder.WriteString(fmt.Sprintf("🔹 %s (%s)\n", storage.Name, storage.PoolName))
+			builder.WriteString(fmt.Sprintf("容量: %s / %s (%.1f%%)\n", usedStr, totalStr, usagePct))
+			builder.WriteString(fmt.Sprintf("告警阈值: %d%%\n\n", storage.NotifyPct))
 		}
+		WechatPush(strings.TrimSpace(builder.String()))
+	} else {
+		WechatPush("⚠️ 未获取到存储卷信息")
+	}
+}
 
-		info, err := fetchUGreenSystemInfo(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL)
-		if err != nil {
-			// Token 可能过期，尝试重新登录一次
-			authInfo, err = loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
-			if err == nil {
-				info, err = fetchUGreenSystemInfo(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL)
-			}
-		}
+// PushUGreenNotifyStatus 菜单触发：主动拉取最新 10 条通知
+func PushUGreenNotifyStatus() {
+	if len(Config.UGreen) == 0 {
+		return
+	}
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+	if authInfo == nil {
+		return
+	}
 
-		if err != nil {
-			log.Printf("[绿联] 获取系统监控数据失败: %v\n", err)
-			continue
-		}
+	notices, _, _ := fetchUGreenNotices(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL)
+	if len(notices) > 0 {
+		WechatPush(buildUGreenPushContent(notices, config.NotifyTypeName+" 近期通知"))
+	} else {
+		WechatPush("当前没有新的系统通知。")
+	}
+}
 
-		pushContent := buildUGreenSystemStatusPushContent(info, config.NotifyTypeName)
-		if pushContent != "" {
-			WechatPush(pushContent)
-			log.Printf("[绿联] 成功为主机 %s 推送系统状态报告\n", config.NotifyTypeName)
+// PushUGreenFeatureStatus 占位与扩展框架
+func PushUGreenFeatureStatus(featureName string) {
+	msg := fmt.Sprintf("🚧 [%s] 接口架构已就绪。\n\n由于绿联深层 API 暂未公开，如需启用此模块，请在 ugreen.go 的底层预留函数中填入实际 API 路径；或将 ugreen-monitor 编译进 Docker 镜像通过系统命令调用。", featureName)
+	WechatPush(msg)
+}
+
+// HandleUGreenPerfCommand 解析并执行微信发来的性能控制文本指令
+func HandleUGreenPerfCommand(command string) {
+	if len(Config.UGreen) == 0 {
+		return
+	}
+	config := Config.UGreen[0]
+	ip, port := SplitIpPort(config.IpPort, 9999)
+	authInfo := ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+	if authInfo == nil {
+		return
+	}
+
+	upperCommand := strings.ToUpper(strings.TrimSpace(command))
+	isFan := strings.HasPrefix(upperCommand, "风扇")
+	isCPU := strings.HasPrefix(upperCommand, "CPU")
+
+	var apiPath string
+	var payload map[string]interface{}
+	var successMsg string
+
+	if isFan {
+		modeStr := strings.TrimSpace(strings.TrimPrefix(upperCommand, "风扇"))
+		mode, err := strconv.Atoi(modeStr)
+		if err != nil || mode < 1 || mode > 3 {
+			WechatPush("⚠️ 风扇指令格式错误。\n1: 静音 | 2: 正常 | 3: 全速\n例如: 风扇 2")
+			return
 		}
+		apiPath = "/ugreen/v1/hw/fan/mode"
+		payload = map[string]interface{}{"mode": mode}
+		modes := map[int]string{1: "静音", 2: "正常", 3: "全速"}
+		successMsg = fmt.Sprintf("🌀 风扇模式已下发切换指令: %s", modes[mode])
+	} else if isCPU {
+		modeStr := strings.TrimSpace(strings.TrimPrefix(upperCommand, "CPU"))
+		mode, err := strconv.Atoi(modeStr)
+		if err != nil || mode < 0 || mode > 2 {
+			WechatPush("⚠️ CPU指令格式错误。\n0: 高性能 | 1: 均衡 | 2: 节能\n例如: CPU 1")
+			return
+		}
+		apiPath = "/ugreen/v1/hw/cpu/mode"
+		payload = map[string]interface{}{"mode": mode}
+		modes := map[int]string{0: "高性能", 1: "均衡", 2: "节能"}
+		successMsg = fmt.Sprintf("⚡ CPU 模式已下发切换指令: %s", modes[mode])
+	}
+
+	err := postUGreenAPI(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL, apiPath, payload)
+	if err != nil {
+		authInfo = ensureAuth(config.Username, config.Password, ip, port, config.UseSSL)
+		err = postUGreenAPI(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL, apiPath, payload)
+	}
+
+	if err != nil {
+		WechatPush(fmt.Sprintf("❌ 指令执行失败: %v", err))
+	} else {
+		WechatPush(successMsg)
 	}
 }
 
 // ==================== 内部辅助请求与解析逻辑 ====================
+
+func ensureAuth(username, password, ip string, port int, useSSL bool) *UGreenAuthInfo {
+	authInfo := loadUGreenAuthInfo(ip, port)
+	if authInfo != nil {
+		return authInfo
+	}
+	newAuth, _ := loginUGreen(username, password, ip, port, useSSL)
+	return newAuth
+}
 
 func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenAuthInfo, error) {
 	protocol := "http"
 	if useSSL {
 		protocol = "https"
 	}
-
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 
 	checkURL := fmt.Sprintf("%s://%s:%d/ugreen/v1/verify/check?token=", protocol, ip, port)
@@ -228,11 +327,10 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 		return nil, err
 	}
 	defer resp.Body.Close()
-	xRsaTokenBase64 := resp.Header.Get("X-Rsa-Token")
 
-	pemBytes, err := base64.StdEncoding.DecodeString(xRsaTokenBase64)
+	pemBytes, err := base64.StdEncoding.DecodeString(resp.Header.Get("X-Rsa-Token"))
 	if err != nil {
-		return nil, fmt.Errorf("解析 RSA Token 失败: %v", err)
+		return nil, err
 	}
 
 	encPassword, err := RsaEncrypt(string(pemBytes), password)
@@ -241,12 +339,7 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 	}
 
 	loginURL := fmt.Sprintf("%s://%s:%d/ugreen/v1/verify/login", protocol, ip, port)
-	loginPayload := map[string]interface{}{
-		"username":  username,
-		"password":  encPassword,
-		"keepalive": true,
-		"is_simple": true,
-	}
+	loginPayload := map[string]interface{}{"username": username, "password": encPassword, "keepalive": true, "is_simple": true}
 	loginReqBody, _ := json.Marshal(loginPayload)
 	req2, _ := http.NewRequest("POST", loginURL, bytes.NewBuffer(loginReqBody))
 	req2.Header.Set("x-specify-language", "zh-CN")
@@ -261,22 +354,11 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 	var loginResp UGreenLoginResp
 	json.Unmarshal(body2, &loginResp)
 
-	if loginResp.Data.Token == "" {
-		return nil, fmt.Errorf("获取真正的 Token 失败，返回: %s", string(body2))
-	}
-
 	pubKeyBytes, _ := base64.StdEncoding.DecodeString(loginResp.Data.PublicKey)
-	finalToken, err := RsaEncrypt(string(pubKeyBytes), loginResp.Data.Token)
-	if err != nil {
-		return nil, err
-	}
+	finalToken, _ := RsaEncrypt(string(pubKeyBytes), loginResp.Data.Token)
 
-	authInfo := &UGreenAuthInfo{
-		TokenID: loginResp.Data.TokenID,
-		Token:   finalToken,
-	}
+	authInfo := &UGreenAuthInfo{TokenID: loginResp.Data.TokenID, Token: finalToken}
 	saveUGreenAuthInfo(ip, port, authInfo)
-
 	return authInfo, nil
 }
 
@@ -287,11 +369,7 @@ func fetchUGreenNotices(tokenID, token, ip string, port int, useSSL bool) ([]UGr
 	}
 	url := fmt.Sprintf("%s://%s:%d/ugreen/v1/desktop/message/list", protocol, ip, port)
 
-	payload := map[string]interface{}{
-		"level": []string{"info", "important", "warning"},
-		"page":  1,
-		"size":  10,
-	}
+	payload := map[string]interface{}{"level": []string{"info", "important", "warning"}, "page": 1, "size": 10}
 	reqBody, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
 	req.Header.Set("x-specify-language", "zh-CN")
@@ -318,14 +396,7 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 		protocol = "https"
 	}
 	baseURL := fmt.Sprintf("%s://%s:%d", protocol, ip, port)
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	info := &UGreenSystemInfo{}
 
 	doGet := func(apiPath string) ([]byte, error) {
@@ -333,7 +404,6 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 		req.Header.Set("x-specify-language", "zh-CN")
 		req.Header.Set("x-ugreen-security-key", tokenID)
 		req.Header.Set("x-ugreen-token", token)
-
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
@@ -344,10 +414,7 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 
 	widgetsRaw, err := doGet("/ugreen/v1/desktop/components")
 	if err != nil {
-		widgetsRaw, err = doGet("/ugreen/v2/desktop/components")
-		if err != nil {
-			return nil, fmt.Errorf("获取组件列表失败: %v", err)
-		}
+		widgetsRaw, _ = doGet("/ugreen/v2/desktop/components")
 	}
 
 	var widgets []struct {
@@ -361,9 +428,8 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 				Type float64 `json:"type"`
 			} `json:"result"`
 		}
-		if json.Unmarshal(widgetsRaw, &wrapped) == nil {
-			widgets = wrapped.Result
-		}
+		json.Unmarshal(widgetsRaw, &wrapped)
+		widgets = wrapped.Result
 	}
 
 	for _, w := range widgets {
@@ -393,9 +459,8 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 			var list struct {
 				StorageList []UGreenStorageItem `json:"storage_list"`
 			}
-			if json.Unmarshal(dataRaw, &list) == nil {
-				info.Storage = list.StorageList
-			}
+			json.Unmarshal(dataRaw, &list)
+			info.Storage = list.StorageList
 		}
 	}
 
@@ -453,10 +518,9 @@ func parseUGreenTaskmgrStats(raw []byte, info *UGreenSystemInfo) {
 		} `json:"data"`
 	}
 
-	if err := json.Unmarshal(raw, &respWrapper); err != nil {
+	if json.Unmarshal(raw, &respWrapper) != nil {
 		return
 	}
-
 	data := respWrapper.Data
 
 	if len(data.Overview.CPU) > 0 {
@@ -466,14 +530,12 @@ func parseUGreenTaskmgrStats(raw []byte, info *UGreenSystemInfo) {
 		info.UsageCpu = data.CPU.Series[0].UsedPercent
 		info.CpuTemp = data.CPU.Series[0].Temp
 	}
-
 	if len(data.Overview.CpuFan) > 0 {
 		info.CpuFan = data.Overview.CpuFan[0].Speed
 	}
 	if len(data.Overview.DeviceFan) > 0 {
 		info.DeviceFan = data.Overview.DeviceFan[0].Speed
 	}
-
 	if len(data.Overview.Mem) > 0 {
 		info.UsageMemory = data.Overview.Mem[0].UsedPercent
 	} else if len(data.Mem.Series) > 0 {
@@ -492,19 +554,49 @@ func parseUGreenTaskmgrStats(raw []byte, info *UGreenSystemInfo) {
 		sendRate = data.Net.Series[0].SendRate
 	}
 
-	info.NetworkReceiveValue = recvRate
-	info.NetworkTransmitValue = sendRate
-	info.NetworkReceive, info.NetworkReceiveUnit = formatUGreenSpeed(recvRate)
-	info.NetworkTransmit, info.NetworkTransmitUnit = formatUGreenSpeed(sendRate)
+	info.NetworkReceiveValue, info.NetworkTransmitValue = recvRate, sendRate
+	info.NetworkReceive, _ = formatUGreenSpeed(recvRate)
+	info.NetworkTransmit, _ = formatUGreenSpeed(sendRate)
 }
 
 func formatUGreenSpeed(bytesPerSec float64) (string, string) {
-	const KB = 1024
-	const MB = KB * 1024
-	if bytesPerSec >= MB {
-		return fmt.Sprintf("%.1fMB/s", bytesPerSec/float64(MB)), "MB/s"
+	if bytesPerSec >= 1024*1024 {
+		return fmt.Sprintf("%.1fMB/s", bytesPerSec/1024/1024), "MB/s"
 	}
-	return fmt.Sprintf("%.1fKB/s", bytesPerSec/float64(KB)), "KB/s"
+	return fmt.Sprintf("%.1fKB/s", bytesPerSec/1024), "KB/s"
+}
+
+func postUGreenAPI(tokenID, token, ip string, port int, useSSL bool, apiPath string, payload map[string]interface{}) error {
+	protocol := "http"
+	if useSSL {
+		protocol = "https"
+	}
+	url := fmt.Sprintf("%s://%s:%d%s", protocol, ip, port, apiPath)
+
+	reqBody, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	req.Header.Set("x-specify-language", "zh-CN")
+	req.Header.Set("x-ugreen-security-key", tokenID)
+	req.Header.Set("x-ugreen-token", token)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("解析结果失败")
+	}
+
+	if code, ok := result["code"].(float64); ok && code != 200 && code != 0 {
+		return fmt.Errorf("返回错误码: %v", code)
+	}
+	return nil
 }
 
 func loadUGreenAuthInfo(ip string, port int) *UGreenAuthInfo {
@@ -529,9 +621,8 @@ func getLastUGreenTime(file string) int64 {
 	if err != nil {
 		return 0
 	}
-	lines := strings.Split(string(content), "\n")
 	var maxTime int64
-	for _, line := range lines {
+	for _, line := range strings.Split(string(content), "\n") {
 		parts := strings.SplitN(line, "：", 2)
 		if len(parts) == 2 {
 			if t, err := time.ParseInLocation("2006-01-02 15:04:05", strings.TrimSpace(parts[0]), time.Local); err == nil {
@@ -558,7 +649,7 @@ func buildUGreenPushContent(notices []UGreenNotice, typeName string) string {
 		return ""
 	}
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("%s消息通知（共%d条）", typeName, len(notices)))
+	builder.WriteString(fmt.Sprintf("%s（共%d条）", typeName, len(notices)))
 	for i, notice := range notices {
 		builder.WriteString(fmt.Sprintf("\n\n%d. %s", i+1, notice.Body))
 	}
@@ -570,152 +661,18 @@ func buildUGreenSystemStatusPushContent(info *UGreenSystemInfo, typeName string)
 		return ""
 	}
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("📊 %s 系统状态报告\n", typeName))
+	builder.WriteString(fmt.Sprintf("📊 %s 概览报告\n", typeName))
 	builder.WriteString(strings.Repeat("-", 22) + "\n")
-	builder.WriteString(fmt.Sprintf("💻 CPU 使用率: %.1f%%\n", info.UsageCpu))
-	builder.WriteString(fmt.Sprintf("🌡️ CPU 温度: %.1f°C\n", info.CpuTemp))
+	builder.WriteString(fmt.Sprintf("💻 CPU: %.1f%%  |  🌡️ %.1f°C\n", info.UsageCpu, info.CpuTemp))
 	if info.CpuFan > 0 {
-		builder.WriteString(fmt.Sprintf("🌀 CPU 风扇: %d RPM\n", info.CpuFan))
+		builder.WriteString(fmt.Sprintf("🌀 CPU风扇: %d RPM\n", info.CpuFan))
 	}
 	if info.DeviceFan > 0 {
 		builder.WriteString(fmt.Sprintf("📦 机箱风扇: %d RPM\n", info.DeviceFan))
 	}
-
 	memUsedGB := float64(info.MemoryUsed) / 1024 / 1024 / 1024
 	memTotalGB := float64(info.MemoryTotal) / 1024 / 1024 / 1024
-	builder.WriteString(fmt.Sprintf("🧠 内存使用: %.1f%% (%.1fG / %.1fG)\n", info.UsageMemory, memUsedGB, memTotalGB))
-	builder.WriteString(fmt.Sprintf("🚀 网络下载: %s\n", info.NetworkReceive))
-	builder.WriteString(fmt.Sprintf("📤 网络上传: %s\n", info.NetworkTransmit))
-
-	if len(info.Storage) > 0 {
-		builder.WriteString(strings.Repeat("-", 22) + "\n")
-		builder.WriteString("💾 存储卷状态:\n")
-		for _, storage := range info.Storage {
-			var usedStr, totalStr string
-			if storage.Size > 1024*1024*1024*1024 {
-				usedStr = fmt.Sprintf("%.2f TB", float64(storage.Used)/1024/1024/1024/1024)
-				totalStr = fmt.Sprintf("%.2f TB", float64(storage.Size)/1024/1024/1024/1024)
-			} else {
-				usedStr = fmt.Sprintf("%.2f GB", float64(storage.Used)/1024/1024/1024)
-				totalStr = fmt.Sprintf("%.2f GB", float64(storage.Size)/1024/1024/1024)
-			}
-			builder.WriteString(fmt.Sprintf("• %s: %s / %s\n", storage.Name, usedStr, totalStr))
-		}
-	}
+	builder.WriteString(fmt.Sprintf("🧠 内存: %.1f%% (%.1fG/%.1fG)\n", info.UsageMemory, memUsedGB, memTotalGB))
+	builder.WriteString(fmt.Sprintf("🚀 下载: %s | 📤 上传: %s\n", info.NetworkReceive, info.NetworkTransmit))
 	return builder.String()
-}
-
-// ==================== 新增：性能指令发送模块 ====================
-
-// HandleUGreenPerfCommand 解析并执行微信发来的性能控制文本指令
-func HandleUGreenPerfCommand(command string) {
-	if len(Config.UGreen) == 0 {
-		WechatPush("⚠️ 未配置绿联 NAS，无法执行指令")
-		return
-	}
-
-	// 默认控制配置中的第一台绿联设备
-	config := Config.UGreen[0]
-	ip, port := SplitIpPort(config.IpPort, 9999)
-	authInfo := loadUGreenAuthInfo(ip, port)
-
-	if authInfo == nil {
-		newAuth, err := loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
-		if err != nil {
-			WechatPush(fmt.Sprintf("❌ 鉴权失败，无法执行指令: %v", err))
-			return
-		}
-		authInfo = newAuth
-	}
-
-	upperCommand := strings.ToUpper(strings.TrimSpace(command))
-	isFan := strings.HasPrefix(upperCommand, "风扇")
-	isCPU := strings.HasPrefix(upperCommand, "CPU")
-
-	var apiPath string
-	var payload map[string]interface{}
-	var successMsg string
-
-	// 解析参数与构造对应API请求
-	if isFan {
-		modeStr := strings.TrimSpace(strings.TrimPrefix(upperCommand, "风扇"))
-		mode, err := strconv.Atoi(modeStr)
-		if err != nil || mode < 1 || mode > 3 {
-			WechatPush("⚠️ 风扇指令格式错误。\n支持的模式:\n1: 静音\n2: 正常\n3: 全速\n\n例如发送: 风扇 2")
-			return
-		}
-		apiPath = "/ugreen/v1/hw/fan/mode"
-		payload = map[string]interface{}{"mode": mode}
-		modes := map[int]string{1: "静音", 2: "正常", 3: "全速"}
-		successMsg = fmt.Sprintf("🌀 风扇模式已下发切换指令: %s", modes[mode])
-	} else if isCPU {
-		modeStr := strings.TrimSpace(strings.TrimPrefix(upperCommand, "CPU"))
-		mode, err := strconv.Atoi(modeStr)
-		if err != nil || mode < 0 || mode > 2 {
-			WechatPush("⚠️ CPU指令格式错误。\n支持的模式:\n0: 高性能\n1: 均衡\n2: 节能\n\n例如发送: CPU 1")
-			return
-		}
-		apiPath = "/ugreen/v1/hw/cpu/mode"
-		payload = map[string]interface{}{"mode": mode}
-		modes := map[int]string{0: "高性能", 1: "均衡", 2: "节能"}
-		successMsg = fmt.Sprintf("⚡ CPU 模式已下发切换指令: %s", modes[mode])
-	}
-
-	err := postUGreenAPI(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL, apiPath, payload)
-
-	if err != nil {
-		// Token 失效重试
-		authInfo, err = loginUGreen(config.Username, config.Password, ip, port, config.UseSSL)
-		if err == nil {
-			err = postUGreenAPI(authInfo.TokenID, authInfo.Token, ip, port, config.UseSSL, apiPath, payload)
-		}
-	}
-
-	if err != nil {
-		WechatPush(fmt.Sprintf("❌ 性能指令执行失败:\n%v", err))
-	} else {
-		WechatPush(successMsg)
-	}
-}
-
-// postUGreenAPI 通用的绿联 POST 请求封装 (用于参数修改等写操作)
-func postUGreenAPI(tokenID, token, ip string, port int, useSSL bool, apiPath string, payload map[string]interface{}) error {
-	protocol := "http"
-	if useSSL {
-		protocol = "https"
-	}
-	url := fmt.Sprintf("%s://%s:%d%s", protocol, ip, port, apiPath)
-
-	reqBody, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
-	req.Header.Set("x-specify-language", "zh-CN")
-	req.Header.Set("x-ugreen-security-key", tokenID)
-	req.Header.Set("x-ugreen-token", token)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{
-		Timeout:   10 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	var result map[string]interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Errorf("解析接口结果失败")
-	}
-
-	// 绿联API成功一般返回 code: 0 或 code: 200
-	if code, ok := result["code"].(float64); ok && code != 200 && code != 0 {
-		errMsg := "未知错误"
-		if msg, ok := result["msg"].(string); ok {
-			errMsg = msg
-		}
-		return fmt.Errorf("返回错误码: %v, 提示: %s", code, errMsg)
-	}
-	return nil
 }
