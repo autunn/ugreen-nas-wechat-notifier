@@ -132,7 +132,7 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 	// 解密准备
 	aesKey, err := base64.StdEncoding.DecodeString(aesKeyStr + "=")
 	if err != nil || len(aesKey) != 32 {
-		c.String(200, "success") // 企业微信要求接收方只要不抛错，都应返回 success 或空串
+		c.String(200, "success")
 		return
 	}
 
@@ -152,22 +152,49 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 	mode := cipher.NewCBCDecrypter(block, aesKey[:16])
 	mode.CryptBlocks(cipherText, cipherText)
 
-	// 解析出真正的 XML 内容 (跳过 16 字节随机码，读取 4 字节长度)
+	// 解析出真正的 XML 内容
 	msgLen := binary.BigEndian.Uint32(cipherText[16:20])
 	plainXmlBytes := cipherText[20 : 20+msgLen]
 
 	var plainMsg WeChatPlainMsg
 	if err := xml.Unmarshal(plainXmlBytes, &plainMsg); err == nil {
-		// 拦截菜单点击事件
+
+		// ==================== 1. 拦截菜单点击事件 ====================
 		if plainMsg.MsgType == "event" && plainMsg.Event == "click" {
-			// 匹配我们第一步中创建的按钮 Key
-			if plainMsg.EventKey == "GET_UGREEN_STATUS" {
-				// 异步触发状态推送
+			switch plainMsg.EventKey {
+			case "GET_UGREEN_INFO":
 				go PushUGreenSystemStatus()
+			case "GET_UGREEN_STORAGE":
+				go WechatPush("🚧 [存储状态] 接口正在接入中，请等待下一步更新。")
+			case "GET_UGREEN_UPS":
+				go WechatPush("🚧 [UPS电源] 接口正在接入中，请等待下一步更新。")
+			case "GET_UGREEN_DOCKER":
+				go WechatPush("🚧 [Docker状态] 接口正在接入中，请等待下一步更新。")
+			case "GET_UGREEN_PS":
+				go WechatPush("🚧 [进程列表] 接口正在接入中，请等待下一步更新。")
+			case "GET_UGREEN_BACKUP":
+				go WechatPush("🚧 [备份任务] 接口正在接入中，请等待下一步更新。")
+			case "GET_UGREEN_POWER":
+				go WechatPush("🚧 [电源配置] 接口正在接入中，请等待下一步更新。")
+			case "GET_UGREEN_PERF":
+				// 下发控制引导说明
+				go WechatPush("🛠️ **性能设置向导**\n\n请直接在聊天框回复以下指令进行控制：\n\n🌀 **风扇控制**\n「风扇 1」: 静音模式\n「风扇 2」: 正常模式\n「风扇 3」: 全速模式\n\n⚡ **CPU 模式**\n「CPU 0」: 高性能模式\n「CPU 1」: 均衡模式\n「CPU 2」: 节能模式")
+			case "GET_UGREEN_NOTIFY":
+				go WechatPush("🚧 [系统通知] 接口正在接入中，请等待下一步更新。")
+			}
+		}
+
+		// ==================== 2. 拦截用户文本输入 (执行性能指令) ====================
+		if plainMsg.MsgType == "text" {
+			content := strings.TrimSpace(plainMsg.Content)
+			upperContent := strings.ToUpper(content)
+
+			// 匹配 "风扇 X" 或 "CPU X"
+			if strings.HasPrefix(content, "风扇") || strings.HasPrefix(upperContent, "CPU") {
+				go HandleUGreenPerfCommand(content)
 			}
 		}
 	}
 
-	// 必须在 5 秒内返回 200 状态码和 success 文本，否则微信会反复重试报错
 	c.String(200, "success")
 }

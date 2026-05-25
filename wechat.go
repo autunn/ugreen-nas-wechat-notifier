@@ -171,13 +171,32 @@ func CreateWechatMenu() {
 
 	url := fmt.Sprintf("%s/cgi-bin/menu/create?access_token=%s&agentid=%s", baseURL, token, agentIDStr)
 
-	// 修改：简化菜单名称，确保绝不会超过限制
+	// 更新为分门别类的复合菜单框架
 	payload := map[string]interface{}{
 		"button": []map[string]interface{}{
 			{
-				"type": "click",
-				"name": "获取状态", // 简化为“获取状态”
-				"key":  "GET_UGREEN_STATUS",
+				"name": "📊 监控",
+				"sub_button": []map[string]interface{}{
+					{"type": "click", "name": "系统概览", "key": "GET_UGREEN_INFO"},
+					{"type": "click", "name": "存储状态", "key": "GET_UGREEN_STORAGE"},
+					{"type": "click", "name": "UPS电源", "key": "GET_UGREEN_UPS"},
+				},
+			},
+			{
+				"name": "🛠️ 服务",
+				"sub_button": []map[string]interface{}{
+					{"type": "click", "name": "Docker", "key": "GET_UGREEN_DOCKER"},
+					{"type": "click", "name": "进程列表", "key": "GET_UGREEN_PS"},
+					{"type": "click", "name": "备份任务", "key": "GET_UGREEN_BACKUP"},
+				},
+			},
+			{
+				"name": "⚙️ 控制",
+				"sub_button": []map[string]interface{}{
+					{"type": "click", "name": "电源配置", "key": "GET_UGREEN_POWER"},
+					{"type": "click", "name": "性能设置", "key": "GET_UGREEN_PERF"},
+					{"type": "click", "name": "系统通知", "key": "GET_UGREEN_NOTIFY"},
+				},
 			},
 		},
 	}
