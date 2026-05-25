@@ -156,7 +156,7 @@ func CreateWechatMenu() {
 	CfgMu.RUnlock()
 
 	if agentIDStr == "" {
-		return // 配置不完整则跳过
+		return
 	}
 
 	baseURL := "https://qyapi.weixin.qq.com"
@@ -171,16 +171,34 @@ func CreateWechatMenu() {
 
 	url := fmt.Sprintf("%s/cgi-bin/menu/create?access_token=%s&agentid=%s", baseURL, token, agentIDStr)
 
-	// 定义菜单结构：一个名为“获取状态”的点击按钮，EventKey 为 GET_UGREEN_STATUS
+	// 修改：简化菜单名称，确保绝不会超过限制
 	payload := map[string]interface{}{
 		"button": []map[string]interface{}{
 			{
 				"type": "click",
-				"name": "获取绿联状态",
+				"name": "获取状态", // 简化为“获取状态”
 				"key":  "GET_UGREEN_STATUS",
 			},
 		},
 	}
+
+	jsonData, _ := json.Marshal(payload)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("创建微信菜单请求失败: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	
+	if errcode, ok := result["errcode"].(float64); ok && errcode == 0 {
+		log.Println("✅ 企业微信自定义菜单自动创建成功！")
+	} else {
+		log.Printf("⚠️ 企业微信菜单创建失败: %v\n", result)
+	}
+}
 
 	jsonData, _ := json.Marshal(payload)
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
