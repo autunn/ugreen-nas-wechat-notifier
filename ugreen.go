@@ -401,52 +401,58 @@ func fetchUGreenSystemInfo(tokenID, token, ip string, port int, useSSL bool) (*U
 }
 
 func parseUGreenTaskmgrStats(raw []byte, info *UGreenSystemInfo) {
-	var data struct {
-		Overview struct {
-			CPU []struct {
-				UsedPercent float64 `json:"used_percent"`
-				Temp        float64 `json:"temp"`
+	// 新增外层包裹，匹配绿联 API 的 {"code":xxx, "data": {...}} 格式
+	var respWrapper struct {
+		Data struct {
+			Overview struct {
+				CPU []struct {
+					UsedPercent float64 `json:"used_percent"`
+					Temp        float64 `json:"temp"`
+				} `json:"cpu"`
+				Mem []struct {
+					UsedPercent float64 `json:"used_percent"`
+				} `json:"mem"`
+				Net []struct {
+					RecvRate float64 `json:"recv_rate"`
+					SendRate float64 `json:"send_rate"`
+				} `json:"net"`
+				CpuFan []struct {
+					Speed int `json:"speed"`
+				} `json:"cpu_fan"`
+				DeviceFan []struct {
+					Speed int `json:"speed"`
+				} `json:"device_fan"`
+			} `json:"overview"`
+			CPU struct {
+				Series []struct {
+					UsedPercent float64 `json:"used_percent"`
+					Temp        float64 `json:"temp"`
+				} `json:"series"`
 			} `json:"cpu"`
-			Mem []struct {
-				UsedPercent float64 `json:"used_percent"`
+			Mem struct {
+				Series []struct {
+					UsedPercent float64 `json:"used_percent"`
+				} `json:"series"`
+				Structure struct {
+					Used  int64 `json:"used"`
+					Total int64 `json:"total"`
+				} `json:"structure"`
 			} `json:"mem"`
-			Net []struct {
-				RecvRate float64 `json:"recv_rate"`
-				SendRate float64 `json:"send_rate"`
+			Net struct {
+				Series []struct {
+					RecvRate float64 `json:"recv_rate"`
+					SendRate float64 `json:"send_rate"`
+				} `json:"series"`
 			} `json:"net"`
-			CpuFan []struct {
-				Speed int `json:"speed"`
-			} `json:"cpu_fan"`
-			DeviceFan []struct {
-				Speed int `json:"speed"`
-			} `json:"device_fan"`
-		} `json:"overview"`
-		CPU struct {
-			Series []struct {
-				UsedPercent float64 `json:"used_percent"`
-				Temp        float64 `json:"temp"`
-			} `json:"series"`
-		} `json:"cpu"`
-		Mem struct {
-			Series []struct {
-				UsedPercent float64 `json:"used_percent"`
-			} `json:"series"`
-			Structure struct {
-				Used  int64 `json:"used"`
-				Total int64 `json:"total"`
-			} `json:"structure"`
-		} `json:"mem"`
-		Net struct {
-			Series []struct {
-				RecvRate float64 `json:"recv_rate"`
-				SendRate float64 `json:"send_rate"`
-			} `json:"series"`
-		} `json:"net"`
+		} `json:"data"`
 	}
 
-	if err := json.Unmarshal(raw, &data); err != nil {
+	if err := json.Unmarshal(raw, &respWrapper); err != nil {
 		return
 	}
+
+	// 重新赋值给 data，保持原有逻辑不变
+	data := respWrapper.Data
 
 	if len(data.Overview.CPU) > 0 {
 		info.UsageCpu = data.Overview.CPU[0].UsedPercent
