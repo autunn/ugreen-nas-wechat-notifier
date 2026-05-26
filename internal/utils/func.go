@@ -90,7 +90,7 @@ func HandleDeviceStatus(deviceType, deviceName, ip string, port int) bool {
 	return false
 }
 
-// WakeOnLAN 发送 UDP 魔术包唤醒局域网设备 (加入定向广播绕过 Docker bridge 限制)
+// WakeOnLAN 发送 UDP 魔术包唤醒局域网设备 (散弹枪模式：全局广播 + 定向广播 + 单播穿透)
 func WakeOnLAN(macAddr string, deviceIpPort string) error {
 	if macAddr == "" {
 		return errors.New("MAC地址为空")
@@ -116,25 +116,45 @@ func WakeOnLAN(macAddr string, deviceIpPort string) error {
 		packet = append(packet, macBytes...)
 	}
 
-	// 核心修改：计算定向广播地址 (绕过 Mac/Win Docker 虚拟网络隔离)
-	broadcastAddr := "255.255.255.255:9" // 兜底使用全局广播
-
-	// 从类似 "192.168.1.9:5000" 的格式中提取纯 IP
 	ip, _ := SplitIpPort(deviceIpPort, 0)
 	parsedIP := net.ParseIP(ip)
 
+	// 目标地址池
+	var targets []string
+	targets = append(targets, "255.255.255.255:9") // 1. 全局广播 (兜底)
+
 	if parsedIP != nil && parsedIP.To4() != nil {
 		ipv4 := parsedIP.To4()
-		// 按照标准家庭内网 /24 子网掩码，将最后一位替换为 255，生成定向广播地址
-		broadcastAddr = fmt.Sprintf("%d.%d.%d.255:9", ipv4[0], ipv4[1], ipv4[2])
+		// 2. 定向广播 (例如 192.168.1.255)
+		directedBroadcast := fmt.Sprintf("%d.%d.%d.255:9", ipv4[0], ipv4[1], ipv4[2])
+		targets = append(targets, directedBroadcast)
+
+		// 3. 单播穿透 (例如 192.168.1.9) - 专治 Mac Docker 网络隔离
+		unicastTarget := fmt.Sprintf("%s:9", ip)
+		targets = append(targets, unicastTarget)
 	}
 
-	conn, err := net.Dial("udp", broadcastAddr)
-	if err != nil {
-		return err
+	// 循环向所有可能的地址轰炸唤醒包
+	var lastErr error
+	successCount := 0
+	for _, target := range targets {
+		conn, err := net.DialTimeout("udp", target, 2*time.Second)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_, err = conn.Write(packet)
+		conn.Close()
+		if err == nil {
+			successCount++
+		} else {
+			lastErr = err
+		}
 	}
-	defer conn.Close()
 
-	_, err = conn.Write(packet)
-	return err
+	if successCount == 0 && lastErr != nil {
+		return fmt.Errorf("所有穿透策略均失败: %v", lastErr)
+	}
+
+	return nil
 }
