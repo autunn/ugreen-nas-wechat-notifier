@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -192,7 +193,7 @@ func PushUGreenStorageStatus() {
 		notify.WechatPush("⚠️ 获取存储卷信息失败: " + err.Error())
 		return
 	}
-
+	log.Printf("【调试】绿联存储原始数据: %s\n", string(raw))
 	type VolumeItem struct {
 		Name     string `json:"name"`
 		Label    string `json:"label"`
