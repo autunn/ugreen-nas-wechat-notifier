@@ -198,6 +198,7 @@ func CreateWechatMenu() {
 					{"type": "click", "name": "电源配置", "key": "GET_UGREEN_POWER"},
 					{"type": "click", "name": "性能设置", "key": "GET_UGREEN_PERF"},
 					{"type": "click", "name": "系统通知", "key": "GET_UGREEN_NOTIFY"},
+					{"type": "click", "name": "远程唤醒", "key": "GET_NAS_WOL"},
 				},
 			},
 		},

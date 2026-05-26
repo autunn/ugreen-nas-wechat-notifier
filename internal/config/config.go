@@ -38,6 +38,7 @@ type ZSpaceConfig struct {
 	Cookie         string `json:"cookie"`
 	NotifyTypeName string `json:"notify_type_name"`
 	UseSSL         bool   `json:"use_ssl"`
+	MacAddress     string `json:"mac_address"`
 }
 
 type UGreenConfig struct {
@@ -46,6 +47,7 @@ type UGreenConfig struct {
 	Password       string `json:"password"`
 	NotifyTypeName string `json:"notify_type_name"`
 	UseSSL         bool   `json:"use_ssl"`
+	MacAddress     string `json:"mac_address"`
 }
 
 type FnOsConfig struct {
@@ -55,6 +57,7 @@ type FnOsConfig struct {
 	NotifyTypeName string `json:"notify_type_name"`
 	UseSSL         bool   `json:"use_ssl"`
 	Cookie         string `json:"cookie"`
+	MacAddress     string `json:"mac_address"`
 }
 
 // InitConfig 从当前目录加载 config/config.json

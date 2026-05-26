@@ -19,6 +19,7 @@ import (
 	"nasnotify-go/internal/config"
 	"nasnotify-go/internal/nas"
 	"nasnotify-go/internal/notify"
+	"nasnotify-go/internal/utils"
 )
 
 // HandleVerify 处理企业微信的 URL 验证及普通 Webhook 的 GET 请求
@@ -174,7 +175,7 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 			case "GET_UGREEN_NOTIFY":
 				go nas.PushUGreenNotifyStatus()
 			case "GET_UGREEN_PERF":
-				go notify.WechatPush("🛠️ **性能设置向导**\n\n请直接在聊天框回复以下指令进行控制：\n\n🌀 **风扇控制**\n「风扇 1」: 静音模式\n「风扇 2」: 正常模式\n「风扇 3」: 全速模式\n\n⚡ **CPU 模式**\n「CPU 0」: 高性能模式\n「CPU 1」: 均衡模式\n「CPU 2」: 节能模式")
+				go notify.WechatPush("🛠️ **控制向导**\n\n请直接在聊天框回复以下指令进行控制：\n\n🌀 **风扇控制**\n「风扇 1」: 静音模式\n「风扇 2」: 正常模式\n「风扇 3」: 全速模式\n\n⚡ **CPU 模式**\n「CPU 0」: 高性能\n「CPU 1」: 均衡\n「CPU 2」: 节能\n\n🟢 **远程唤醒**\n「唤醒 设备名称」 (例如: 唤醒 绿联)")
 			}
 		}
 
@@ -185,9 +186,55 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 
 			if strings.HasPrefix(content, "风扇") || strings.HasPrefix(upperContent, "CPU") {
 				go nas.HandleUGreenPerfCommand(content)
+			} else if strings.HasPrefix(content, "唤醒") {
+				targetName := strings.TrimSpace(strings.TrimPrefix(content, "唤醒"))
+				go handleWakeCommand(targetName)
 			}
 		}
 	}
 
 	c.String(200, "success")
+}
+
+// handleWakeCommand 模糊匹配配置中的设备并下发唤醒魔术包
+func handleWakeCommand(targetName string) {
+	if targetName == "" {
+		notify.WechatPush("⚠️ 指令错误：请指定要唤醒的设备名称，例如「唤醒 绿联」")
+		return
+	}
+
+	config.CfgMu.RLock()
+	defer config.CfgMu.RUnlock()
+
+	var macs []string
+
+	for _, cfg := range config.Config.UGreen {
+		if strings.Contains(cfg.NotifyTypeName, targetName) && cfg.MacAddress != "" {
+			macs = append(macs, cfg.MacAddress)
+		}
+	}
+	for _, cfg := range config.Config.ZSpace {
+		if strings.Contains(cfg.NotifyTypeName, targetName) && cfg.MacAddress != "" {
+			macs = append(macs, cfg.MacAddress)
+		}
+	}
+	for _, cfg := range config.Config.FnOs {
+		if strings.Contains(cfg.NotifyTypeName, targetName) && cfg.MacAddress != "" {
+			macs = append(macs, cfg.MacAddress)
+		}
+	}
+
+	if len(macs) == 0 {
+		notify.WechatPush(fmt.Sprintf("⚠️ 唤醒失败：未找到包含「%s」的设备，或该设备在后台未配置 MAC 地址。", targetName))
+		return
+	}
+
+	for _, mac := range macs {
+		err := utils.WakeOnLAN(mac)
+		if err != nil {
+			notify.WechatPush(fmt.Sprintf("❌ 向设备(MAC: %s) 发送唤醒包失败: %v", mac, err))
+		} else {
+			notify.WechatPush(fmt.Sprintf("✅ 唤醒包已发出，正在尝试唤醒目标设备(MAC: %s)", mac))
+		}
+	}
 }

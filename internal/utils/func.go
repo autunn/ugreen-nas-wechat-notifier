@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -86,4 +88,41 @@ func HandleDeviceStatus(deviceType, deviceName, ip string, port int) bool {
 	}
 
 	return false
+}
+
+// WakeOnLAN 发送 UDP 魔术包唤醒局域网设备
+func WakeOnLAN(macAddr string) error {
+	if macAddr == "" {
+		return errors.New("MAC地址为空")
+	}
+	macStr := strings.ReplaceAll(macAddr, ":", "")
+	macStr = strings.ReplaceAll(macStr, "-", "")
+	if len(macStr) != 12 {
+		return errors.New("无效的MAC地址格式")
+	}
+
+	macBytes, err := hex.DecodeString(macStr)
+	if err != nil {
+		return err
+	}
+
+	var packet []byte
+	// 6 字节的 0xFF
+	for i := 0; i < 6; i++ {
+		packet = append(packet, 0xFF)
+	}
+	// 16 次 MAC 地址
+	for i := 0; i < 16; i++ {
+		packet = append(packet, macBytes...)
+	}
+
+	// 发送到全局广播地址
+	conn, err := net.Dial("udp", "255.255.255.255:9")
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_, err = conn.Write(packet)
+	return err
 }
