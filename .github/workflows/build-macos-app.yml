@@ -1,0 +1,197 @@
+name: Build macOS App
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "APP_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          else
+            echo "APP_VERSION=v$(date +'%Y.%m.%d')" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build NasNotify-Go.app
+        run: |
+          APP_NAME="NasNotify-Go"
+          APP_BUNDLE="dist/${APP_NAME}.app"
+
+          mkdir -p "${APP_BUNDLE}/Contents/MacOS"
+          mkdir -p "${APP_BUNDLE}/Contents/Resources"
+
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build \
+            -ldflags "-s -w -X main.Version=${APP_VERSION}" \
+            -o "${APP_BUNDLE}/Contents/Resources/nasnotify-go-app" ./cmd/nasnotify
+
+          cp -R templates "${APP_BUNDLE}/Contents/Resources/templates"
+
+          cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>NasNotify-Go</string>
+            <key>CFBundleDisplayName</key>
+            <string>NasNotify-Go</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.autunn.nasnotify-go</string>
+            <key>CFBundleVersion</key>
+            <string>${GITHUB_RUN_NUMBER}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${APP_VERSION#v}</string>
+            <key>CFBundleExecutable</key>
+            <string>NasNotify-Go</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+            <key>LSUIElement</key>
+            <true/>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          cat > "${APP_BUNDLE}/Contents/MacOS/NasNotify-Go" <<'EOF'
+          #!/bin/bash
+          set -e
+
+          PORT=5080
+          APP_CONTENTS="$(cd "$(dirname "$0")/.." && pwd)"
+          APP_SUPPORT="$HOME/Library/Application Support/NasNotify-Go"
+          LOG_DIR="$HOME/Library/Logs"
+          LOG_FILE="$LOG_DIR/NasNotify-Go.log"
+          PID_FILE="$APP_SUPPORT/nasnotify-go.pid"
+
+          mkdir -p "$APP_SUPPORT/config" "$APP_SUPPORT/data" "$LOG_DIR"
+
+          rm -rf "$APP_SUPPORT/templates"
+          cp -R "$APP_CONTENTS/Resources/templates" "$APP_SUPPORT/templates"
+
+          cd "$APP_SUPPORT"
+
+          if /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+            /usr/bin/open "http://localhost:$PORT"
+            exit 0
+          fi
+
+          if [ -f "$PID_FILE" ]; then
+            OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+            if [ -n "$OLD_PID" ] && /bin/kill -0 "$OLD_PID" 2>/dev/null; then
+              /usr/bin/open "http://localhost:$PORT"
+              exit 0
+            fi
+            rm -f "$PID_FILE"
+          fi
+
+          nohup "$APP_CONTENTS/Resources/nasnotify-go-app" >> "$LOG_FILE" 2>&1 &
+          echo $! > "$PID_FILE"
+
+          for i in {1..30}; do
+            if /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+              /usr/bin/open "http://localhost:$PORT"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          /usr/bin/osascript -e 'display alert "NasNotify-Go 启动失败" message "请查看 ~/Library/Logs/NasNotify-Go.log"'
+          exit 1
+          EOF
+
+          chmod +x "${APP_BUNDLE}/Contents/MacOS/NasNotify-Go"
+          chmod +x "${APP_BUNDLE}/Contents/Resources/nasnotify-go-app"
+
+          codesign --force --deep --sign - "${APP_BUNDLE}"
+
+      - name: Build Stop App
+        run: |
+          STOP_APP="dist/Stop NasNotify-Go.app"
+
+          mkdir -p "${STOP_APP}/Contents/MacOS"
+
+          cat > "${STOP_APP}/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>Stop NasNotify-Go</string>
+            <key>CFBundleDisplayName</key>
+            <string>Stop NasNotify-Go</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.autunn.nasnotify-go.stop</string>
+            <key>CFBundleExecutable</key>
+            <string>Stop NasNotify-Go</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSUIElement</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          cat > "${STOP_APP}/Contents/MacOS/Stop NasNotify-Go" <<'EOF'
+          #!/bin/bash
+
+          APP_SUPPORT="$HOME/Library/Application Support/NasNotify-Go"
+          PID_FILE="$APP_SUPPORT/nasnotify-go.pid"
+
+          if [ -f "$PID_FILE" ]; then
+            PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+            if [ -n "$PID" ]; then
+              kill "$PID" 2>/dev/null || true
+            fi
+            rm -f "$PID_FILE"
+          fi
+
+          pkill -f "nasnotify-go-app" 2>/dev/null || true
+
+          /usr/bin/osascript -e 'display notification "NasNotify-Go 已停止" with title "NasNotify-Go"'
+          EOF
+
+          chmod +x "${STOP_APP}/Contents/MacOS/Stop NasNotify-Go"
+          codesign --force --deep --sign - "${STOP_APP}"
+
+      - name: Build DMG
+        run: |
+          mkdir -p dmgroot
+          cp -R "dist/NasNotify-Go.app" dmgroot/
+          cp -R "dist/Stop NasNotify-Go.app" dmgroot/
+
+          hdiutil create \
+            -volname "NasNotify-Go" \
+            -srcfolder dmgroot \
+            -ov \
+            -format UDZO \
+            "NasNotify-Go-macOS-arm64.dmg"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: NasNotify-Go-macOS-arm64
+          path: NasNotify-Go-macOS-arm64.dmg
