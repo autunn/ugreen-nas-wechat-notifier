@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -193,15 +192,16 @@ func PushUGreenStorageStatus() {
 		notify.WechatPush("⚠️ 获取存储卷信息失败: " + err.Error())
 		return
 	}
-	log.Printf("【调试】绿联存储原始数据: %s\n", string(raw))
+
+	// 修复：对齐绿联最新的真实 JSON 字段名
 	type VolumeItem struct {
-		Name     string `json:"name"`
-		Label    string `json:"label"`
-		PoolName string `json:"pool_name"`
-		Size     int64  `json:"size"`
-		Used     int64  `json:"used"`
-		Status   int    `json:"status"`
-		FsType   string `json:"fs_type"`
+		Name       string `json:"name"`
+		Label      string `json:"label"`
+		PoolName   string `json:"poolname"` // 修正 pool_name -> poolname
+		Total      int64  `json:"total"`    // 修正 size -> total
+		Used       int64  `json:"used"`
+		Status     int    `json:"status"`
+		FileSystem string `json:"filesystem"` // 修正 fs_type -> filesystem
 	}
 
 	var volumes []VolumeItem
@@ -230,16 +230,18 @@ func PushUGreenStorageStatus() {
 
 	for _, v := range volumes {
 		var usedStr, totalStr string
-		if v.Size > 1024*1024*1024*1024 {
+		// 统一处理 TB 和 GB 的显示逻辑
+		if v.Total >= 1024*1024*1024*1024 {
 			usedStr = fmt.Sprintf("%.2f TB", float64(v.Used)/1024/1024/1024/1024)
-			totalStr = fmt.Sprintf("%.2f TB", float64(v.Size)/1024/1024/1024/1024)
+			totalStr = fmt.Sprintf("%.2f TB", float64(v.Total)/1024/1024/1024/1024)
 		} else {
 			usedStr = fmt.Sprintf("%.2f GB", float64(v.Used)/1024/1024/1024)
-			totalStr = fmt.Sprintf("%.2f GB", float64(v.Size)/1024/1024/1024)
+			totalStr = fmt.Sprintf("%.2f GB", float64(v.Total)/1024/1024/1024)
 		}
+
 		usagePct := float64(0)
-		if v.Size > 0 {
-			usagePct = float64(v.Used) / float64(v.Size) * 100
+		if v.Total > 0 {
+			usagePct = float64(v.Used) / float64(v.Total) * 100
 		}
 
 		label := v.Label
@@ -249,7 +251,7 @@ func PushUGreenStorageStatus() {
 
 		builder.WriteString(fmt.Sprintf("🔹 %s (%s)\n", label, v.PoolName))
 		builder.WriteString(fmt.Sprintf("容量: %s / %s (%.1f%%)\n", usedStr, totalStr, usagePct))
-		builder.WriteString(fmt.Sprintf("文件系统: %s\n\n", v.FsType))
+		builder.WriteString(fmt.Sprintf("文件系统: %s\n\n", v.FileSystem))
 	}
 
 	notify.WechatPush(strings.TrimSpace(builder.String()))
