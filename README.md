@@ -131,5 +131,5 @@ go build -ldflags "-s -w -X main.Version=v2026.05.x" -o nasnotify-go-app ./cmd/n
 
 本项目的诞生离不开开源社区的贡献，特别感谢以下开源项目提供的灵感与 API 参考：
 
-- [bilibili-koryking/nasnotify](https://github.com/bilibili-koryking/nasnotify) - 提供了企业微信 Webhook 交互与基础通知链路的优秀实现思路。
+- [bilibili-koryking/nasnotify](https://github.com/bilibili-koryking/nasnotify) - 提供了各大 NAS 平台**通知获取**的优秀实现思路与代码参考。
 - [xbclub/ugreen-monitor](https://github.com/xbclub/ugreen-monitor) - 提供了绿联深层 API (UGreen Deep API) 的相关接口分析与参考。
