@@ -153,29 +153,28 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 		// ==================== 1. 拦截菜单点击事件 ====================
 		if plainMsg.MsgType == "event" && plainMsg.Event == "click" {
 			switch plainMsg.EventKey {
-			// 📊 监控类
 			case "GET_UGREEN_INFO":
 				go nas.PushUGreenSystemStatus()
 			case "GET_UGREEN_STORAGE":
 				go nas.PushUGreenStorageStatus()
 			case "GET_UGREEN_UPS":
 				go nas.PushUGreenUpsStatus()
-
-			// 🛠️ 服务类
 			case "GET_UGREEN_DOCKER":
 				go nas.PushUGreenDockerStatus()
 			case "GET_UGREEN_PS":
 				go nas.PushUGreenPsStatus()
 			case "GET_UGREEN_BACKUP":
 				go nas.PushUGreenBackupStatus()
-
-			// ⚙️ 控制类
 			case "GET_UGREEN_POWER":
 				go nas.PushUGreenPowerStatus()
 			case "GET_UGREEN_NOTIFY":
 				go nas.PushUGreenNotifyStatus()
 			case "GET_UGREEN_PERF":
-				go notify.WechatPush("🛠️ **控制向导**\n\n请直接在聊天框回复以下指令进行控制：\n\n🌀 **风扇控制**\n「风扇 1」: 静音模式\n「风扇 2」: 正常模式\n「风扇 3」: 全速模式\n\n⚡ **CPU 模式**\n「CPU 0」: 高性能\n「CPU 1」: 均衡\n「CPU 2」: 节能\n\n🟢 **远程唤醒**\n「唤醒 设备名称」 (例如: 唤醒 绿联)")
+				go notify.WechatPush("🛠️ **性能控制向导**\n\n请直接在聊天框回复以下指令：\n\n🌀 **风扇控制**\n「风扇 1」: 静音模式\n「风扇 2」: 正常模式\n「风扇 3」: 全速模式\n\n⚡ **CPU 模式**\n「CPU 0」: 高性能\n「CPU 1」: 均衡\n「CPU 2」: 节能")
+
+			// 新增：拦截点击“远程唤醒”菜单按钮
+			case "GET_NAS_WOL":
+				go notify.WechatPush("🟢 **远程唤醒向导**\n\n为了精准唤醒目标设备，请直接在聊天框发送指令：\n\n「唤醒 设备名称」\n(例如: 唤醒 绿联)\n\n⚠️ 提示：请确保已在网页后台配置了目标设备的 MAC 地址。")
 			}
 		}
 
@@ -187,6 +186,7 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 			if strings.HasPrefix(content, "风扇") || strings.HasPrefix(upperContent, "CPU") {
 				go nas.HandleUGreenPerfCommand(content)
 			} else if strings.HasPrefix(content, "唤醒") {
+				// 新增：拦截文字“唤醒 xxx”指令
 				targetName := strings.TrimSpace(strings.TrimPrefix(content, "唤醒"))
 				go handleWakeCommand(targetName)
 			}
@@ -234,7 +234,7 @@ func handleWakeCommand(targetName string) {
 		if err != nil {
 			notify.WechatPush(fmt.Sprintf("❌ 向设备(MAC: %s) 发送唤醒包失败: %v", mac, err))
 		} else {
-			notify.WechatPush(fmt.Sprintf("✅ 唤醒包已发出，正在尝试唤醒目标设备(MAC: %s)", mac))
+			notify.WechatPush(fmt.Sprintf("✅ 唤醒指令已发出，正在尝试唤醒目标设备 (MAC: %s)", mac))
 		}
 	}
 }
