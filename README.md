@@ -47,7 +47,7 @@ nasnotify_go/
 version: '3.8'
 services:
   nasnotify:
-    image: ghcr.io/你的GitHub用户名/nasnotify-go:latest  # 请替换为实际的镜像路径
+    image: ghcr.io/autunn/nasnotify-go:latest  # 请替换为实际的镜像路径
     container_name: nasnotify-go
     restart: unless-stopped
     network_mode: bridge
