@@ -212,10 +212,15 @@ func PushUGreenStorageStatus() {
 	var volumes []VolumeItem
 	if err := json.Unmarshal(raw, &volumes); err != nil {
 		var wrapped struct {
-			List []VolumeItem `json:"list"`
+			List   []VolumeItem `json:"list"`
+			Result []VolumeItem `json:"result"`
 		}
 		if err2 := json.Unmarshal(raw, &wrapped); err2 == nil {
-			volumes = wrapped.List
+			if len(wrapped.Result) > 0 {
+				volumes = wrapped.Result
+			} else {
+				volumes = wrapped.List
+			}
 		}
 	}
 
