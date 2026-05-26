@@ -37,6 +37,7 @@ nasnotify_go/
 ├── config/                  # 配置文件目录 (包含 config.json)
 ├── Dockerfile               # 多架构 Docker 交叉编译构建脚本
 └── go.mod / go.sum
+```
 
 ## 🚀 Docker 部署
 
@@ -57,6 +58,7 @@ services:
       - ./data:/app/data
     environment:
       - TZ=Asia/Shanghai
+```
 
 启动后，在浏览器中访问 http://<你的IP>:5080 进入 Web 配置界面。
 
