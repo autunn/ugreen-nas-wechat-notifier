@@ -90,8 +90,8 @@ func HandleDeviceStatus(deviceType, deviceName, ip string, port int) bool {
 	return false
 }
 
-// WakeOnLAN 发送 UDP 魔术包唤醒局域网设备
-func WakeOnLAN(macAddr string) error {
+// WakeOnLAN 发送 UDP 魔术包唤醒局域网设备 (加入定向广播绕过 Docker bridge 限制)
+func WakeOnLAN(macAddr string, deviceIpPort string) error {
 	if macAddr == "" {
 		return errors.New("MAC地址为空")
 	}
@@ -116,8 +116,20 @@ func WakeOnLAN(macAddr string) error {
 		packet = append(packet, macBytes...)
 	}
 
-	// 发送到全局广播地址
-	conn, err := net.Dial("udp", "255.255.255.255:9")
+	// 核心修改：计算定向广播地址 (绕过 Mac/Win Docker 虚拟网络隔离)
+	broadcastAddr := "255.255.255.255:9" // 兜底使用全局广播
+
+	// 从类似 "192.168.1.9:5000" 的格式中提取纯 IP
+	ip, _ := SplitIpPort(deviceIpPort, 0)
+	parsedIP := net.ParseIP(ip)
+
+	if parsedIP != nil && parsedIP.To4() != nil {
+		ipv4 := parsedIP.To4()
+		// 按照标准家庭内网 /24 子网掩码，将最后一位替换为 255，生成定向广播地址
+		broadcastAddr = fmt.Sprintf("%d.%d.%d.255:9", ipv4[0], ipv4[1], ipv4[2])
+	}
+
+	conn, err := net.Dial("udp", broadcastAddr)
 	if err != nil {
 		return err
 	}
