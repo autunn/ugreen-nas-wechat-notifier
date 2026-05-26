@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"crypto/aes"
@@ -15,20 +15,24 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"nasnotify-go/internal/config"
+	"nasnotify-go/internal/nas"
+	"nasnotify-go/internal/notify"
 )
 
-// handleVerify 处理企业微信的 URL 验证及普通 Webhook 的 GET 请求
-func handleVerify(c *gin.Context) {
+// HandleVerify 处理企业微信的 URL 验证及普通 Webhook 的 GET 请求
+func HandleVerify(c *gin.Context) {
 	echostr := c.Query("echostr")
 	if echostr == "" && (c.Query("text") != "" || c.Query("message") != "" || c.Query("task") != "") {
-		handleMessage(c)
+		HandleMessage(c)
 		return
 	}
 
-	CfgMu.RLock()
-	token := Config.Token
-	aesKeyStr := Config.EncodingAESKey
-	CfgMu.RUnlock()
+	config.CfgMu.RLock()
+	token := config.Config.Token
+	aesKeyStr := config.Config.EncodingAESKey
+	config.CfgMu.RUnlock()
 
 	msgSig := c.Query("msg_signature")
 	timestamp := c.Query("timestamp")
@@ -68,11 +72,11 @@ func handleVerify(c *gin.Context) {
 	c.String(200, string(cipherText[20:20+msgLen]))
 }
 
-// handleMessage 统一处理接收到的通用 Webhook 推送与企业微信交互事件
-func handleMessage(c *gin.Context) {
+// HandleMessage 统一处理接收到的通用 Webhook 推送与企业微信交互事件
+func HandleMessage(c *gin.Context) {
 	bodyBytes, _ := io.ReadAll(c.Request.Body)
 
-	var xmlMsg WeChatXMLMsg
+	var xmlMsg notify.WeChatXMLMsg
 	if len(bodyBytes) > 0 {
 		if err := xml.Unmarshal(bodyBytes, &xmlMsg); err == nil && xmlMsg.Encrypt != "" {
 			processWechatEvent(c, xmlMsg.Encrypt)
@@ -106,7 +110,7 @@ func handleMessage(c *gin.Context) {
 		for k, v := range data {
 			description.WriteString(fmt.Sprintf("\n%s: %v", k, v))
 		}
-		go WechatPush(description.String())
+		go notify.WechatPush(description.String())
 	}
 
 	c.JSON(200, gin.H{"status": "ok"})
@@ -114,9 +118,9 @@ func handleMessage(c *gin.Context) {
 
 // processWechatEvent 解密企业微信的指令并执行对应操作
 func processWechatEvent(c *gin.Context, encryptStr string) {
-	CfgMu.RLock()
-	aesKeyStr := Config.EncodingAESKey
-	CfgMu.RUnlock()
+	config.CfgMu.RLock()
+	aesKeyStr := config.Config.EncodingAESKey
+	config.CfgMu.RUnlock()
 
 	aesKey, err := base64.StdEncoding.DecodeString(aesKeyStr + "=")
 	if err != nil || len(aesKey) != 32 {
@@ -142,7 +146,7 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 	msgLen := binary.BigEndian.Uint32(cipherText[16:20])
 	plainXmlBytes := cipherText[20 : 20+msgLen]
 
-	var plainMsg WeChatPlainMsg
+	var plainMsg notify.WeChatPlainMsg
 	if err := xml.Unmarshal(plainXmlBytes, &plainMsg); err == nil {
 
 		// ==================== 1. 拦截菜单点击事件 ====================
@@ -150,27 +154,27 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 			switch plainMsg.EventKey {
 			// 📊 监控类
 			case "GET_UGREEN_INFO":
-				go PushUGreenSystemStatus()
+				go nas.PushUGreenSystemStatus()
 			case "GET_UGREEN_STORAGE":
-				go PushUGreenStorageStatus() // 已经更新为新的接口
+				go nas.PushUGreenStorageStatus()
 			case "GET_UGREEN_UPS":
-				go PushUGreenUpsStatus() // 已经解除了暂未接入的封印，真正去请求 UPS
+				go nas.PushUGreenUpsStatus()
 
 			// 🛠️ 服务类
 			case "GET_UGREEN_DOCKER":
-				go PushUGreenDockerStatus()
+				go nas.PushUGreenDockerStatus()
 			case "GET_UGREEN_PS":
-				go PushUGreenPsStatus()
+				go nas.PushUGreenPsStatus()
 			case "GET_UGREEN_BACKUP":
-				go PushUGreenBackupStatus()
+				go nas.PushUGreenBackupStatus()
 
 			// ⚙️ 控制类
 			case "GET_UGREEN_POWER":
-				go PushUGreenPowerStatus()
+				go nas.PushUGreenPowerStatus()
 			case "GET_UGREEN_NOTIFY":
-				go PushUGreenNotifyStatus()
+				go nas.PushUGreenNotifyStatus()
 			case "GET_UGREEN_PERF":
-				go WechatPush("🛠️ **性能设置向导**\n\n请直接在聊天框回复以下指令进行控制：\n\n🌀 **风扇控制**\n「风扇 1」: 静音模式\n「风扇 2」: 正常模式\n「风扇 3」: 全速模式\n\n⚡ **CPU 模式**\n「CPU 0」: 高性能模式\n「CPU 1」: 均衡模式\n「CPU 2」: 节能模式")
+				go notify.WechatPush("🛠️ **性能设置向导**\n\n请直接在聊天框回复以下指令进行控制：\n\n🌀 **风扇控制**\n「风扇 1」: 静音模式\n「风扇 2」: 正常模式\n「风扇 3」: 全速模式\n\n⚡ **CPU 模式**\n「CPU 0」: 高性能模式\n「CPU 1」: 均衡模式\n「CPU 2」: 节能模式")
 			}
 		}
 
@@ -180,7 +184,7 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 			upperContent := strings.ToUpper(content)
 
 			if strings.HasPrefix(content, "风扇") || strings.HasPrefix(upperContent, "CPU") {
-				go HandleUGreenPerfCommand(content)
+				go nas.HandleUGreenPerfCommand(content)
 			}
 		}
 	}

@@ -1,4 +1,4 @@
-package main
+package nas
 
 import (
 	"crypto/tls"
@@ -12,6 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"nasnotify-go/internal/config"
+	"nasnotify-go/internal/notify"
+	"nasnotify-go/internal/utils"
 )
 
 // ZSpaceNotice 定义极空间的通知结构
@@ -28,20 +32,20 @@ type ZSpaceResponse struct {
 
 // ProcessZSpace 极空间任务主函数
 func ProcessZSpace() {
-	if len(Config.ZSpace) == 0 {
+	if len(config.Config.ZSpace) == 0 {
 		return
 	}
 
-	for _, config := range Config.ZSpace {
-		ip, port := SplitIpPort(config.IpPort, 5055)
-		if !HandleDeviceStatus("极空间", config.NotifyTypeName, ip, port) {
+	for _, cfg := range config.Config.ZSpace {
+		ip, port := utils.SplitIpPort(cfg.IpPort, 5055)
+		if !utils.HandleDeviceStatus("极空间", cfg.NotifyTypeName, ip, port) {
 			continue
 		}
 
 		logFile := filepath.Join("data", "log", fmt.Sprintf("%s_%d.log", ip, port))
 
 		// 1. 获取最新通知
-		notices, err := fetchZSpaceNotices(config.Cookie, ip, port, config.UseSSL)
+		notices, err := fetchZSpaceNotices(cfg.Cookie, ip, port, cfg.UseSSL)
 		if err != nil {
 			log.Printf("[极空间] 获取通知失败: %v\n", err)
 			continue
@@ -65,21 +69,21 @@ func ProcessZSpace() {
 		if isFirstRun {
 			// 首次运行：保存所有数据并推送
 			saveZSpaceNotices(newNotices, logFile)
-			pushContent := buildZSpacePushContent(newNotices, config.NotifyTypeName)
+			pushContent := buildZSpacePushContent(newNotices, cfg.NotifyTypeName)
 			if pushContent != "" {
-				WechatPush(pushContent)
+				notify.WechatPush(pushContent)
 				log.Println("[极空间] 新增通知 (首次生成)")
 			}
 		} else if len(newNotices) > 0 {
 			// 非首次运行：有更新数据，覆盖写入并推送
 			saveZSpaceNotices(newNotices, logFile)
-			pushContent := buildZSpacePushContent(newNotices, config.NotifyTypeName)
+			pushContent := buildZSpacePushContent(newNotices, cfg.NotifyTypeName)
 			if pushContent != "" {
-				WechatPush(pushContent)
+				notify.WechatPush(pushContent)
 				log.Println("[极空间] 覆盖日志，新增通知")
 			}
 		} else {
-			log.Printf("[极空间] %s 没有新的通知\n", config.NotifyTypeName)
+			log.Printf("[极空间] %s 没有新的通知\n", cfg.NotifyTypeName)
 		}
 	}
 }

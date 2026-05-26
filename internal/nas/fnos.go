@@ -1,4 +1,4 @@
-package main
+package nas
 
 import (
 	"crypto/tls"
@@ -16,6 +16,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"nasnotify-go/internal/config"
+	"nasnotify-go/internal/crypto"
+	"nasnotify-go/internal/notify"
+	"nasnotify-go/internal/utils"
 )
 
 // fnOs 专用的时间格式
@@ -37,20 +42,20 @@ type FnOsClient struct {
 
 // ProcessFnOs 飞牛任务主函数
 func ProcessFnOs() {
-	if len(Config.FnOs) == 0 {
+	if len(config.Config.FnOs) == 0 {
 		return
 	}
 
-	for _, config := range Config.FnOs {
-		ip, port := SplitIpPort(config.Server, 5666)
-		if !HandleDeviceStatus("飞牛", config.NotifyTypeName, ip, port) {
+	for _, cfg := range config.Config.FnOs {
+		ip, port := utils.SplitIpPort(cfg.Server, 5666)
+		if !utils.HandleDeviceStatus("飞牛", cfg.NotifyTypeName, ip, port) {
 			continue
 		}
 
 		logFile := filepath.Join("data", "log", fmt.Sprintf("%s_%d.log", ip, port))
 
 		client := NewFnOsClient()
-		err := client.Connect(config.Server, config.UseSSL, config.Cookie)
+		err := client.Connect(cfg.Server, cfg.UseSSL, cfg.Cookie)
 		if err != nil {
 			log.Printf("[飞牛] 连接失败: %v\n", err)
 			continue
@@ -65,7 +70,7 @@ func ProcessFnOs() {
 		}
 
 		// 2. 登录鉴权
-		err = client.Login(config.Username, config.Password)
+		err = client.Login(cfg.Username, cfg.Password)
 		if err != nil {
 			log.Printf("[飞牛] 登录失败: %v\n", err)
 			client.Close()
@@ -118,13 +123,13 @@ func ProcessFnOs() {
 			}
 
 			saveFnOsNotices(newNotices, logFile)
-			pushContent := buildFnOsPushContent(newNotices, config.NotifyTypeName)
+			pushContent := buildFnOsPushContent(newNotices, cfg.NotifyTypeName)
 			if pushContent != "" {
-				WechatPush(pushContent)
+				notify.WechatPush(pushContent)
 				log.Printf("[飞牛] 发现 %d 条新通知并已推送\n", len(newNotices))
 			}
 		} else {
-			log.Printf("[飞牛] %s 没有新的通知\n", config.NotifyTypeName)
+			log.Printf("[飞牛] %s 没有新的通知\n", cfg.NotifyTypeName)
 		}
 	}
 }
@@ -213,9 +218,9 @@ func (c *FnOsClient) Request(reqType string, params map[string]interface{}) (map
 		jsonData, _ := json.Marshal(payload)
 
 		// RSA 加密 AES 密钥
-		rsaEnc, _ := RsaEncrypt(c.pub, c.aesKey)
+		rsaEnc, _ := crypto.RsaEncrypt(c.pub, c.aesKey)
 		// AES 加密 Payload
-		aesEnc, _ := AesEncrypt(string(jsonData), c.aesKey, c.iv)
+		aesEnc, _ := crypto.AesEncrypt(string(jsonData), c.aesKey, c.iv)
 
 		payload = map[string]interface{}{
 			"req":   "encrypted",
@@ -231,7 +236,7 @@ func (c *FnOsClient) Request(reqType string, params map[string]interface{}) (map
 
 	// 需要签名的请求
 	if reqType != "encrypted" && reqType != "util.crypto.getRSAPub" && c.signKey != "" {
-		sig, _ := GetSignature(string(jsonStr), c.signKey)
+		sig, _ := crypto.GetSignature(string(jsonStr), c.signKey)
 		messageStr = sig + string(jsonStr)
 	} else {
 		messageStr = string(jsonStr)
@@ -289,7 +294,7 @@ func (c *FnOsClient) Login(username, password string) error {
 		c.backId = bid
 	}
 	if sec, ok := resp["secret"].(string); ok {
-		c.signKey, _ = AesDecrypt(sec, c.aesKey, c.iv)
+		c.signKey, _ = crypto.AesDecrypt(sec, c.aesKey, c.iv)
 	}
 	return nil
 }

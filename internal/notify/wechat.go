@@ -1,4 +1,4 @@
-package main
+package notify
 
 import (
 	"bytes"
@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"nasnotify-go/internal/config"
 )
 
 var (
@@ -43,10 +45,10 @@ type WeChatPlainMsg struct {
 
 // getWeChatToken 获取企业微信 Token (支持代理)
 func getWeChatToken(baseURL string) string {
-	CfgMu.RLock()
-	corpID := Config.CorpID
-	corpSecret := Config.CorpSecret
-	CfgMu.RUnlock()
+	config.CfgMu.RLock()
+	corpID := config.Config.CorpID
+	corpSecret := config.Config.CorpSecret
+	config.CfgMu.RUnlock()
 
 	if corpID == "" || corpSecret == "" {
 		return ""
@@ -84,12 +86,12 @@ func getWeChatToken(baseURL string) string {
 
 // WechatPush 发送通知 (图文卡片)
 func WechatPush(content string) {
-	CfgMu.RLock()
-	agentIDStr := Config.AgentID
-	proxyURL := Config.ProxyURL
-	photoURL := Config.PhotoURL
-	nasURL := Config.NasURL
-	CfgMu.RUnlock()
+	config.CfgMu.RLock()
+	agentIDStr := config.Config.AgentID
+	proxyURL := config.Config.ProxyURL
+	photoURL := config.Config.PhotoURL
+	nasURL := config.Config.NasURL
+	config.CfgMu.RUnlock()
 
 	baseURL := "https://qyapi.weixin.qq.com"
 	if proxyURL != "" {
@@ -150,10 +152,10 @@ func WechatPush(content string) {
 
 // CreateWechatMenu 自动调用官方 API 创建底部菜单
 func CreateWechatMenu() {
-	CfgMu.RLock()
-	agentIDStr := Config.AgentID
-	proxyURL := Config.ProxyURL
-	CfgMu.RUnlock()
+	config.CfgMu.RLock()
+	agentIDStr := config.Config.AgentID
+	proxyURL := config.Config.ProxyURL
+	config.CfgMu.RUnlock()
 
 	if agentIDStr == "" {
 		return

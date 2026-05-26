@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"nasnotify-go/internal/notify"
 )
 
 var (
@@ -65,7 +67,7 @@ func HandleDeviceStatus(deviceType, deviceName, ip string, port int) bool {
 			deviceOfflineCount[deviceKey] = 0
 
 			recoveryMsg := fmt.Sprintf("✅ 设备恢复在线\n\n设备类型: %s\n设备名称: %s\n地址: %s:%d", deviceType, deviceName, ip, port)
-			go WechatPush(recoveryMsg)
+			go notify.WechatPush(recoveryMsg)
 		}
 		return true
 	}
@@ -78,7 +80,7 @@ func HandleDeviceStatus(deviceType, deviceName, ip string, port int) bool {
 	if count <= 3 {
 		log.Printf("[%s] %s (%s:%d) 离线，正在发送第 %d/3 次告警\n", deviceType, deviceName, ip, port, count)
 		msg := fmt.Sprintf("⚠️ 设备离线告警\n\n设备类型: %s\n设备名称: %s\n地址: %s:%d\n(连续告警第 %d/3 次)", deviceType, deviceName, ip, port, count)
-		go WechatPush(msg)
+		go notify.WechatPush(msg)
 	} else {
 		log.Printf("[%s] %s (%s:%d) 离线，已超过 3 次告警限制，静默处理\n", deviceType, deviceName, ip, port)
 	}

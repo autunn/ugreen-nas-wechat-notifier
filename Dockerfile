@@ -8,13 +8,16 @@ ARG TARGETARCH
 
 WORKDIR /app
 RUN apk add --no-cache git
+
+# 复制整个项目（包含 go.mod, cmd, internal, templates 等）
 COPY . .
 
 RUN go mod download
-# 核心秘诀：直接指定 GOARCH=$TARGETARCH 进行极速交叉编译
+
+# 核心修改：将编译目标路径从 . 改为 ./cmd/nasnotify
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags "-s -w -X main.Version=${APP_VERSION}" \
-    -o nasnotify-go-app .
+    -o nasnotify-go-app ./cmd/nasnotify
 
 # ==========================================
 # 最终运行阶段：拉取对应架构的 alpine 基础镜像
@@ -28,7 +31,6 @@ RUN apk add --no-cache ca-certificates tzdata \
 
 # 把极速编译好的二进制文件复制过来
 COPY --from=builder /app/nasnotify-go-app .
-
 # 复制前端模板文件夹
 COPY templates ./templates
 
