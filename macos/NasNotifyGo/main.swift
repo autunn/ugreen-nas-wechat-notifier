@@ -7,7 +7,7 @@ extension String {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let port = 5080
 
     private let serviceLabel = "com.autunn.nasnotify-go.service"
@@ -109,71 +109,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.title = "NAS"
             button.toolTip = "NasNotify-Go"
-
-            button.target = self
-            button.action = #selector(statusItemClicked(_:))
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
+        statusMenu.delegate = self
+        statusMenu.autoenablesItems = false
+
         rebuildMenu()
+
+        statusItem.menu = statusMenu
     }
 
-    @objc private func statusItemClicked(_ sender: Any?) {
+    func menuNeedsUpdate(_ menu: NSMenu) {
         rebuildMenu()
-
-        guard let button = statusItem.button else {
-            return
-        }
-
-        NSApp.activate(ignoringOtherApps: true)
-
-        statusMenu.popUp(
-            positioning: nil,
-            at: NSPoint(x: 0, y: button.bounds.height + 4),
-            in: button
-        )
     }
 
     private func rebuildMenu() {
-        let menu = NSMenu()
+        statusMenu.removeAllItems()
 
         let statusTitle = isServiceRunning() ? "NasNotify-Go：运行中" : "NasNotify-Go：已停止"
         let statusMenuItem = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
-        menu.addItem(statusMenuItem)
+        statusMenu.addItem(statusMenuItem)
 
-        menu.addItem(NSMenuItem.separator())
+        statusMenu.addItem(NSMenuItem.separator())
 
-        menu.addItem(NSMenuItem(title: "打开后台", action: #selector(openWebConsoleAction), keyEquivalent: "o"))
+        let openItem = NSMenuItem(title: "打开后台", action: #selector(openWebConsoleAction), keyEquivalent: "o")
+        openItem.target = self
+        openItem.isEnabled = true
+        statusMenu.addItem(openItem)
 
         if isServiceRunning() {
-            menu.addItem(NSMenuItem(title: "停止服务", action: #selector(stopServiceAction), keyEquivalent: "s"))
-            menu.addItem(NSMenuItem(title: "重启服务", action: #selector(restartServiceAction), keyEquivalent: "r"))
+            let stopItem = NSMenuItem(title: "停止服务", action: #selector(stopServiceAction), keyEquivalent: "s")
+            stopItem.target = self
+            stopItem.isEnabled = true
+            statusMenu.addItem(stopItem)
+
+            let restartItem = NSMenuItem(title: "重启服务", action: #selector(restartServiceAction), keyEquivalent: "r")
+            restartItem.target = self
+            restartItem.isEnabled = true
+            statusMenu.addItem(restartItem)
         } else {
-            menu.addItem(NSMenuItem(title: "启动服务", action: #selector(startServiceAction), keyEquivalent: "s"))
+            let startItem = NSMenuItem(title: "启动服务", action: #selector(startServiceAction), keyEquivalent: "s")
+            startItem.target = self
+            startItem.isEnabled = true
+            statusMenu.addItem(startItem)
         }
 
-        menu.addItem(NSMenuItem.separator())
+        statusMenu.addItem(NSMenuItem.separator())
 
         let autoStartTitle = isAutoStartEnabled() ? "关闭登录自启动" : "开启登录自启动"
-        menu.addItem(NSMenuItem(title: autoStartTitle, action: #selector(toggleAutoStartAction), keyEquivalent: ""))
+        let autoStartItem = NSMenuItem(title: autoStartTitle, action: #selector(toggleAutoStartAction), keyEquivalent: "")
+        autoStartItem.target = self
+        autoStartItem.isEnabled = true
+        statusMenu.addItem(autoStartItem)
 
-        menu.addItem(NSMenuItem.separator())
+        statusMenu.addItem(NSMenuItem.separator())
 
-        menu.addItem(NSMenuItem(title: "打开配置目录", action: #selector(openConfigFolderAction), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "打开日志", action: #selector(openLogAction), keyEquivalent: ""))
+        let configItem = NSMenuItem(title: "打开配置目录", action: #selector(openConfigFolderAction), keyEquivalent: "")
+        configItem.target = self
+        configItem.isEnabled = true
+        statusMenu.addItem(configItem)
 
-        menu.addItem(NSMenuItem.separator())
+        let logItem = NSMenuItem(title: "打开日志", action: #selector(openLogAction), keyEquivalent: "")
+        logItem.target = self
+        logItem.isEnabled = true
+        statusMenu.addItem(logItem)
 
-        menu.addItem(NSMenuItem(title: "退出菜单栏 App", action: #selector(quitAppAction), keyEquivalent: "q"))
+        statusMenu.addItem(NSMenuItem.separator())
 
-        for item in menu.items {
-            if item.action != nil {
-                item.target = self
-            }
-        }
-
-        statusMenu = menu
+        let quitItem = NSMenuItem(title: "退出菜单栏 App", action: #selector(quitAppAction), keyEquivalent: "q")
+        quitItem.target = self
+        quitItem.isEnabled = true
+        statusMenu.addItem(quitItem)
     }
 
     private func prepareDirectories() {
@@ -289,6 +296,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = runShell("/bin/launchctl bootout gui/$(id -u) \(servicePlistURL.path.shellQuoted) >/dev/null 2>&1 || true")
         _ = runShell("/bin/launchctl bootstrap gui/$(id -u) \(servicePlistURL.path.shellQuoted) >/dev/null 2>&1 || true")
         _ = runShell("/bin/launchctl kickstart -k gui/$(id -u)/\(serviceLabel) >/dev/null 2>&1 || true")
+
+        _ = runShell("/bin/launchctl bootout gui/$(id -u)/\(appLabel) >/dev/null 2>&1 || true")
+        _ = runShell("/bin/launchctl bootout gui/$(id -u) \(appPlistURL.path.shellQuoted) >/dev/null 2>&1 || true")
+        _ = runShell("/bin/launchctl bootstrap gui/$(id -u) \(appPlistURL.path.shellQuoted) >/dev/null 2>&1 || true")
 
         showNotification("已开启登录自启动")
         rebuildMenu()
