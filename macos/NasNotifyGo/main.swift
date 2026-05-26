@@ -9,10 +9,12 @@ extension String {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let port = 5080
+
     private let serviceLabel = "com.autunn.nasnotify-go.service"
     private let appLabel = "com.autunn.nasnotify-go.app"
 
     private var statusItem: NSStatusItem!
+    private var statusMenu = NSMenu()
 
     private var isLoginLaunch: Bool {
         CommandLine.arguments.contains("--login-item")
@@ -92,6 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !isLoginLaunch {
             askAutoStartOnFirstLaunch()
         }
+
+        showNotification("NasNotify-Go 已在后台运行")
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -103,24 +107,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            if let image = NSImage(systemSymbolName: "externaldrive.connected.to.line.below", accessibilityDescription: "NasNotify-Go") {
-                image.isTemplate = true
-                button.image = image
-            } else {
-                button.title = "NAS"
-            }
+            button.title = "NAS"
+            button.toolTip = "NasNotify-Go"
+
+            button.target = self
+            button.action = #selector(statusItemClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         rebuildMenu()
+    }
+
+    @objc private func statusItemClicked(_ sender: Any?) {
+        rebuildMenu()
+
+        guard let button = statusItem.button else {
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        statusMenu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: button.bounds.height + 4),
+            in: button
+        )
     }
 
     private func rebuildMenu() {
         let menu = NSMenu()
 
         let statusTitle = isServiceRunning() ? "NasNotify-Go：运行中" : "NasNotify-Go：已停止"
-        let statusItem = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
-        statusItem.isEnabled = false
-        menu.addItem(statusItem)
+        let statusMenuItem = NSMenuItem(title: statusTitle, action: nil, keyEquivalent: "")
+        statusMenuItem.isEnabled = false
+        menu.addItem(statusMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -147,8 +167,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem(title: "退出菜单栏 App", action: #selector(quitAppAction), keyEquivalent: "q"))
 
-        menu.items.forEach { $0.target = self }
-        self.statusItem.menu = menu
+        for item in menu.items {
+            if item.action != nil {
+                item.target = self
+            }
+        }
+
+        statusMenu = menu
     }
 
     private func prepareDirectories() {
@@ -168,6 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if fm.fileExists(atPath: targetTemplates.path) {
                     try fm.removeItem(at: targetTemplates)
                 }
+
                 try fm.copyItem(at: bundledTemplates, to: targetTemplates)
             }
         } catch {
@@ -192,6 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if openWeb {
                 openWebConsole()
             }
+
             rebuildMenu()
             return
         }
@@ -205,6 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             nohup \(serviceRunnerURL.path.shellQuoted) >> \(logFileURL.path.shellQuoted) 2>&1 & \
             echo $! > \(pidFileURL.path.shellQuoted)
             """
+
             _ = runShell(command)
         }
 
@@ -213,9 +241,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if openWeb {
                     openWebConsole()
                 }
+
                 rebuildMenu()
                 return
             }
+
             Thread.sleep(forTimeInterval: 1)
         }
 
@@ -228,10 +258,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = runShell("/bin/launchctl bootout gui/$(id -u) \(servicePlistURL.path.shellQuoted) >/dev/null 2>&1 || true")
 
         if FileManager.default.fileExists(atPath: pidFileURL.path) {
-            let pidText = (try? String(contentsOf: pidFileURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let pidText = (try? String(contentsOf: pidFileURL, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
             if let pidText, !pidText.isEmpty {
                 _ = runShell("/bin/kill \(pidText) >/dev/null 2>&1 || true")
             }
+
             try? FileManager.default.removeItem(at: pidFileURL)
         }
 
@@ -253,6 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         writeAppLaunchAgent()
 
         _ = runShell("/bin/launchctl bootout gui/$(id -u)/\(serviceLabel) >/dev/null 2>&1 || true")
+        _ = runShell("/bin/launchctl bootout gui/$(id -u) \(servicePlistURL.path.shellQuoted) >/dev/null 2>&1 || true")
         _ = runShell("/bin/launchctl bootstrap gui/$(id -u) \(servicePlistURL.path.shellQuoted) >/dev/null 2>&1 || true")
         _ = runShell("/bin/launchctl kickstart -k gui/$(id -u)/\(serviceLabel) >/dev/null 2>&1 || true")
 
@@ -262,6 +296,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func disableAutoStart() {
         _ = runShell("/bin/launchctl bootout gui/$(id -u)/\(appLabel) >/dev/null 2>&1 || true")
+        _ = runShell("/bin/launchctl bootout gui/$(id -u)/\(serviceLabel) >/dev/null 2>&1 || true")
+        _ = runShell("/bin/launchctl bootout gui/$(id -u) \(appPlistURL.path.shellQuoted) >/dev/null 2>&1 || true")
+        _ = runShell("/bin/launchctl bootout gui/$(id -u) \(servicePlistURL.path.shellQuoted) >/dev/null 2>&1 || true")
 
         try? FileManager.default.removeItem(at: appPlistURL)
         try? FileManager.default.removeItem(at: servicePlistURL)
@@ -306,8 +343,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         </plist>
         """
 
-        try? plist.write(to: servicePlistURL, atomically: true, encoding: .utf8)
-        _ = runShell("/bin/chmod 644 \(servicePlistURL.path.shellQuoted)")
+        do {
+            try plist.write(to: servicePlistURL, atomically: true, encoding: .utf8)
+            _ = runShell("/bin/chmod 644 \(servicePlistURL.path.shellQuoted)")
+        } catch {
+            showAlert(title: "写入服务自启动失败", message: error.localizedDescription)
+        }
     }
 
     private func writeAppLaunchAgent() {
@@ -338,8 +379,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         </plist>
         """
 
-        try? plist.write(to: appPlistURL, atomically: true, encoding: .utf8)
-        _ = runShell("/bin/chmod 644 \(appPlistURL.path.shellQuoted)")
+        do {
+            try plist.write(to: appPlistURL, atomically: true, encoding: .utf8)
+            _ = runShell("/bin/chmod 644 \(appPlistURL.path.shellQuoted)")
+        } catch {
+            showAlert(title: "写入菜单栏自启动失败", message: error.localizedDescription)
+        }
     }
 
     private func askAutoStartOnFirstLaunch() {
@@ -356,6 +401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "暂不启用")
 
         let response = alert.runModal()
+
         if response == .alertFirstButtonReturn {
             enableAutoStart()
         }
@@ -366,10 +412,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showAlert(title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.runModal()
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = message
+            alert.runModal()
+        }
     }
 
     private func showNotification(_ message: String) {
@@ -394,6 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8) ?? ""
+
             return (process.terminationStatus, output)
         } catch {
             return (1, error.localizedDescription)
