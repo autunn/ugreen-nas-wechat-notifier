@@ -1,0 +1,155 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "APP_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          else
+            echo "APP_VERSION=v$(date +'%Y.%m.%d')-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build NasNotify-Go.app
+        run: |
+          set -e
+
+          APP_NAME="NasNotify-Go"
+          APP_BUNDLE="dist/${APP_NAME}.app"
+          CONTENTS="${APP_BUNDLE}/Contents"
+          MACOS="${CONTENTS}/MacOS"
+          RESOURCES="${CONTENTS}/Resources"
+
+          rm -rf dist
+          mkdir -p "${MACOS}" "${RESOURCES}"
+
+          echo "Build Go backend for macOS arm64..."
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build \
+            -ldflags "-s -w -X main.Version=${APP_VERSION}" \
+            -o "${RESOURCES}/nasnotify-go-app" ./cmd/nasnotify
+
+          echo "Copy templates..."
+          cp -R templates "${RESOURCES}/templates"
+
+          echo "Create service runner..."
+          cat > "${RESOURCES}/service-runner.sh" <<'EOF'
+          #!/bin/bash
+          set -e
+
+          APP_CONTENTS="$(cd "$(dirname "$0")/.." && pwd)"
+          APP_RESOURCES="$APP_CONTENTS/Resources"
+
+          APP_SUPPORT="$HOME/Library/Application Support/NasNotify-Go"
+          CONFIG_DIR="$APP_SUPPORT/config"
+          DATA_DIR="$APP_SUPPORT/data"
+          LOG_DIR="$HOME/Library/Logs"
+          LOG_FILE="$LOG_DIR/NasNotify-Go.log"
+
+          mkdir -p "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
+
+          rm -rf "$APP_SUPPORT/templates"
+          cp -R "$APP_RESOURCES/templates" "$APP_SUPPORT/templates"
+
+          cd "$APP_SUPPORT"
+
+          exec "$APP_RESOURCES/nasnotify-go-app" >> "$LOG_FILE" 2>&1
+          EOF
+
+          chmod +x "${RESOURCES}/service-runner.sh"
+          chmod +x "${RESOURCES}/nasnotify-go-app"
+
+          echo "Create Info.plist..."
+          cat > "${CONTENTS}/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>NasNotify-Go</string>
+
+            <key>CFBundleDisplayName</key>
+            <string>NasNotify-Go</string>
+
+            <key>CFBundleIdentifier</key>
+            <string>com.autunn.nasnotify-go</string>
+
+            <key>CFBundleVersion</key>
+            <string>${GITHUB_RUN_NUMBER}</string>
+
+            <key>CFBundleShortVersionString</key>
+            <string>${APP_VERSION#v}</string>
+
+            <key>CFBundleExecutable</key>
+            <string>NasNotify-Go</string>
+
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+
+            <key>LSUIElement</key>
+            <true/>
+
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          echo "Compile Swift menu bar app..."
+          swiftc \
+            -target arm64-apple-macos11.0 \
+            -framework Cocoa \
+            macos/NasNotifyGo/main.swift \
+            -o "${MACOS}/NasNotify-Go"
+
+          chmod +x "${MACOS}/NasNotify-Go"
+
+          echo "Ad-hoc codesign..."
+          codesign --force --deep --sign - "${APP_BUNDLE}"
+
+      - name: Build DMG
+        run: |
+          set -e
+
+          rm -rf dmgroot
+          mkdir -p dmgroot
+
+          cp -R "dist/NasNotify-Go.app" dmgroot/
+          ln -s /Applications dmgroot/Applications
+
+          hdiutil create \
+            -volname "NasNotify-Go" \
+            -srcfolder dmgroot \
+            -ov \
+            -format UDZO \
+            "NasNotify-Go-macOS-arm64.dmg"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: NasNotify-Go-macOS-arm64-dmg
+          path: NasNotify-Go-macOS-arm64.dmg
