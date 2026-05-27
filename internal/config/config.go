@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 )
+
+const ConfigPath = "config/config.json"
 
 // 全局配置与读写锁
 var (
@@ -15,10 +18,15 @@ var (
 
 // AppConfig 根配置结构
 type AppConfig struct {
-	AdminPassword   string  `json:"admin_password"`
+	// 新版字段：只保存 bcrypt hash，不保存明文密码
+	AdminPasswordHash string `json:"admin_password_hash,omitempty"`
+
+	// 旧版兼容字段：只用于迁移旧配置，不再保存明文密码
+	AdminPassword string `json:"admin_password,omitempty"`
+
 	IntervalMinutes float64 `json:"interval_minutes"`
 
-	// 企业微信参数 (完全对齐 NasWebhook)
+	// 企业微信参数
 	CorpID         string `json:"corpid"`
 	AgentID        string `json:"agentid"`
 	CorpSecret     string `json:"corpsecret"`
@@ -60,43 +68,146 @@ type FnOsConfig struct {
 	MacAddress     string `json:"mac_address"`
 }
 
-// InitConfig 从当前目录加载 config/config.json
+// InitConfig 从当前目录加载 config/config.json。
+// 找不到配置文件时不再设置默认密码，进入首次初始化模式。
 func InitConfig() {
 	CfgMu.Lock()
 	defer CfgMu.Unlock()
 
-	data, err := os.ReadFile("config/config.json")
+	if err := os.MkdirAll(filepath.Dir(ConfigPath), 0755); err != nil {
+		log.Fatalf("创建配置目录失败: %v", err)
+	}
+
+	data, err := os.ReadFile(ConfigPath)
 	if err != nil {
-		log.Println("未找到 config/config.json，将以空配置启动，请通过网页进行配置。")
+		log.Println("未找到 config/config.json，将进入首次初始化模式。")
 		Config = AppConfig{
-			AdminPassword:   "admin",
 			IntervalMinutes: 5,
 		}
 		return
 	}
 
-	err = json.Unmarshal(data, &Config)
-	if err != nil {
+	if err := json.Unmarshal(data, &Config); err != nil {
 		log.Fatalf("解析 config/config.json 失败: %v", err)
 	}
 
-	if Config.AdminPassword == "" {
-		Config.AdminPassword = "admin"
-	}
-	if Config.IntervalMinutes <= 0 {
-		Config.IntervalMinutes = 5
-	}
+	normalizeConfigLocked()
 }
 
-// SaveConfig 保存配置到文件
+// IsInitialized 判断系统是否已经完成初始化。
+// 只认 admin_password_hash，不再认旧版明文 admin_password。
+func IsInitialized() bool {
+	CfgMu.RLock()
+	defer CfgMu.RUnlock()
+	return Config.AdminPasswordHash != ""
+}
+
+// GetAdminPasswordHash 返回管理员密码 hash。
+func GetAdminPasswordHash() string {
+	CfgMu.RLock()
+	defer CfgMu.RUnlock()
+	return Config.AdminPasswordHash
+}
+
+// GetConfigSnapshot 返回当前配置快照。
+func GetConfigSnapshot() AppConfig {
+	CfgMu.RLock()
+	defer CfgMu.RUnlock()
+
+	snapshot := Config
+	snapshot.ZSpace = cloneZSpace(Config.ZSpace)
+	snapshot.UGreen = cloneUGreen(Config.UGreen)
+	snapshot.FnOs = cloneFnOs(Config.FnOs)
+
+	return snapshot
+}
+
+// SanitizedConfigForWeb 返回给前端使用的配置。
+// 注意：不返回管理员密码 hash，也不返回旧版明文密码。
+func SanitizedConfigForWeb() AppConfig {
+	snapshot := GetConfigSnapshot()
+	snapshot.AdminPasswordHash = ""
+	snapshot.AdminPassword = ""
+	return snapshot
+}
+
+// SaveConfig 保存配置到文件。
 func SaveConfig(newConfig AppConfig) error {
 	CfgMu.Lock()
 	defer CfgMu.Unlock()
 
 	Config = newConfig
+	normalizeConfigLocked()
+
+	// 绝不保存旧版明文后台密码
+	Config.AdminPassword = ""
+
 	data, err := json.MarshalIndent(Config, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile("config/config.json", data, 0644)
+
+	if err := os.MkdirAll(filepath.Dir(ConfigPath), 0755); err != nil {
+		return err
+	}
+
+	tmpPath := ConfigPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return err
+	}
+
+	if err := os.Chmod(tmpPath, 0600); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	if err := os.Rename(tmpPath, ConfigPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	return nil
+}
+
+func normalizeConfigLocked() {
+	if Config.IntervalMinutes <= 0 {
+		Config.IntervalMinutes = 5
+	}
+
+	if Config.ZSpace == nil {
+		Config.ZSpace = []ZSpaceConfig{}
+	}
+	if Config.UGreen == nil {
+		Config.UGreen = []UGreenConfig{}
+	}
+	if Config.FnOs == nil {
+		Config.FnOs = []FnOsConfig{}
+	}
+}
+
+func cloneZSpace(in []ZSpaceConfig) []ZSpaceConfig {
+	if in == nil {
+		return nil
+	}
+	out := make([]ZSpaceConfig, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneUGreen(in []UGreenConfig) []UGreenConfig {
+	if in == nil {
+		return nil
+	}
+	out := make([]UGreenConfig, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneFnOs(in []FnOsConfig) []FnOsConfig {
+	if in == nil {
+		return nil
+	}
+	out := make([]FnOsConfig, len(in))
+	copy(out, in)
+	return out
 }

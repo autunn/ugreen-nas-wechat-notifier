@@ -1,55 +1,30 @@
- <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body {
-      background: #f4f6f9;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      display: flex;
-      justify-content: center;
-      margin: 0;
-      padding: 20px;
-      box-sizing: border-box;
-    }
-
-    .container {
-      background: white;
-      padding: 30px;
-      border-radius: 12px;
-      width: 100%;
-      max-width: 600px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-      position: relative;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 25px;
+ margin-bottom: 20px;
       border-bottom: 1px solid #f1f5f9;
       padding-bottom: 15px;
     }
 
-    .logo {
-      height: 1.2em;
-      width: 1.2em;
-      object-fit: contain;
-      border-radius: 4px;
-    }
-
     h2 {
       margin: 0;
-      font-size: 1.4rem;
+      font-size: 1.5rem;
       color: #1e293b;
     }
 
-    .logout {
-      position: absolute;
-      top: 30px;
-      right: 30px;
-      color: #ef4444;
-      text-decoration: none;
+    .desc {
+      margin-top: 8px;
+      color: #64748b;
       font-size: 14px;
-      font-weight: 600;
+      line-height: 1.6;
+    }
+
+    .warning {
+      background: #fff7ed;
+      color: #9a3412;
+      border: 1px solid #fed7aa;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      margin-bottom: 20px;
     }
 
     .group {
@@ -90,23 +65,6 @@
 
     button:hover {
       background: #1d4ed8;
-    }
-
-    .success-msg {
-      background: #dcfce7;
-      color: #166534;
-      padding: 12px;
-      border-radius: 6px;
-      margin-bottom: 20px;
-      text-align: center;
-      font-size: 14px;
-    }
-
-    .hint {
-      color: #94a3b8;
-      font-size: 12px;
-      margin-top: 6px;
-      line-height: 1.5;
     }
 
     .section-title {
@@ -155,32 +113,53 @@
       font-weight: normal;
       color: #475569;
     }
+
+    .footer {
+      text-align: center;
+      font-size: 11px;
+      color: #cbd5e1;
+      margin-top: 25px;
+      font-family: monospace;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <a href="/logout" class="logout">退出 ⏻</a>
-
     <div class="header">
-      <h2>设置面板</h2>
+      <h2>首次初始化</h2>
+      <div class="desc">
+        当前系统尚未设置管理员密码。请先完成初始化，初始化完成后此页面会自动关闭。
+      </div>
     </div>
 
-    {{if .success}}
-    <div class="success-msg">✅ 配置已成功保存！</div>
-    {{end}}
+    <div class="warning">
+      为防止公网部署时被他人抢先初始化，请输入启动日志中显示的初始化令牌。
+      如果你是通过日志里的完整链接进入，本字段会自动填充。
+    </div>
 
-    <form id="configForm">
-      <div class="section-title">系统基础配置</div>
+    <form id="setupForm">
+      <div class="section-title">初始化安全设置</div>
 
       <div class="group">
-        <label>修改后台登录密码</label>
-        <input type="password" id="new_admin_password" placeholder="留空表示不修改；新密码至少 8 位">
-        <div class="hint">管理员密码不会再明文保存，只会保存 bcrypt hash。</div>
+        <label>初始化令牌</label>
+        <input type="password" id="init_token" value="{{.setupToken}}" placeholder="请查看程序启动日志" required>
       </div>
 
       <div class="group">
+        <label>管理员密码</label>
+        <input type="password" id="admin_password" placeholder="至少 8 位" required>
+      </div>
+
+      <div class="group">
+        <label>确认管理员密码</label>
+        <input type="password" id="admin_password_confirm" placeholder="再次输入管理员密码" required>
+      </div>
+
+      <div class="section-title">系统基础配置</div>
+
+      <div class="group">
         <label>轮询间隔 (分钟)</label>
-        <input type="number" id="interval_minutes" step="0.1" required>
+        <input type="number" id="interval_minutes" step="0.1" value="5" required>
       </div>
 
       <div class="section-title">企业微信参数</div>
@@ -237,69 +216,16 @@
         <label class="inline-check"><input type="checkbox" id="fn_ssl"> 使用 HTTPS</label>
       </div>
 
-      <button type="button" id="testPushBtn" onclick="sendTestPush()">发送测试通知</button>
-      <button type="button" onclick="saveConfig()">保存并应用</button>
+      <button type="button" onclick="submitSetup()">完成初始化</button>
     </form>
 
-    <div style="text-align: center; font-size: 11px; color: #cbd5e1; margin-top: 25px; font-family: monospace;">
-      {{.version}}
-    </div>
+    <div class="footer">{{.version}}</div>
   </div>
 
   <script>
-    const rawConfig = {{.configJson}};
-
     function toggleForm(id, show) {
       document.getElementById(id).classList.toggle('active', show);
     }
-
-    window.onload = function() {
-      document.getElementById('interval_minutes').value = rawConfig.interval_minutes || 5;
-
-      document.getElementById('corpid').value = rawConfig.corpid || '';
-      document.getElementById('agentid').value = rawConfig.agentid || '';
-      document.getElementById('corpsecret').value = rawConfig.corpsecret || '';
-      document.getElementById('token').value = rawConfig.token || '';
-      document.getElementById('encoding_aes_key').value = rawConfig.encoding_aes_key || '';
-      document.getElementById('nas_url').value = rawConfig.nas_url || '';
-      document.getElementById('photo_url').value = rawConfig.photo_url || '';
-      document.getElementById('proxy_url').value = rawConfig.proxy_url || '';
-
-      if (rawConfig.zspace?.length) {
-        document.getElementById('enable_zspace').checked = true;
-        toggleForm('form_zspace', true);
-
-        document.getElementById('zs_ip').value = rawConfig.zspace[0].ip_port || '';
-        document.getElementById('zs_cookie').value = rawConfig.zspace[0].cookie || '';
-        document.getElementById('zs_name').value = rawConfig.zspace[0].notify_type_name || '';
-        document.getElementById('zs_mac').value = rawConfig.zspace[0].mac_address || '';
-        document.getElementById('zs_ssl').checked = rawConfig.zspace[0].use_ssl;
-      }
-
-      if (rawConfig.ugreen?.length) {
-        document.getElementById('enable_ugreen').checked = true;
-        toggleForm('form_ugreen', true);
-
-        document.getElementById('ug_ip').value = rawConfig.ugreen[0].ip_port || '';
-        document.getElementById('ug_user').value = rawConfig.ugreen[0].username || '';
-        document.getElementById('ug_pass').value = rawConfig.ugreen[0].password || '';
-        document.getElementById('ug_name').value = rawConfig.ugreen[0].notify_type_name || '';
-        document.getElementById('ug_mac').value = rawConfig.ugreen[0].mac_address || '';
-        document.getElementById('ug_ssl').checked = rawConfig.ugreen[0].use_ssl;
-      }
-
-      if (rawConfig.fnos?.length) {
-        document.getElementById('enable_fnos').checked = true;
-        toggleForm('form_fnos', true);
-
-        document.getElementById('fn_ip').value = rawConfig.fnos[0].server || '';
-        document.getElementById('fn_user').value = rawConfig.fnos[0].username || '';
-        document.getElementById('fn_pass').value = rawConfig.fnos[0].password || '';
-        document.getElementById('fn_name').value = rawConfig.fnos[0].notify_type_name || '';
-        document.getElementById('fn_mac').value = rawConfig.fnos[0].mac_address || '';
-        document.getElementById('fn_ssl').checked = rawConfig.fnos[0].use_ssl;
-      }
-    };
 
     function buildConfig() {
       return {
@@ -342,27 +268,34 @@
       };
     }
 
-    async function saveConfig() {
-      const newPassword = document.getElementById('new_admin_password').value;
+    async function submitSetup() {
+      const password = document.getElementById('admin_password').value;
+      const confirmPassword = document.getElementById('admin_password_confirm').value;
 
-      if (newPassword && newPassword.length < 8) {
-        alert('新管理员密码至少 8 位');
+      if (password.length < 8) {
+        alert('管理员密码至少 8 位');
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        alert('两次输入的管理员密码不一致');
         return;
       }
 
       const payload = {
-        new_admin_password: newPassword,
+        init_token: document.getElementById('init_token').value,
+        admin_password: password,
         config: buildConfig()
       };
 
-      const res = await fetch('/save', {
+      const res = await fetch('/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
-        let msg = '保存失败';
+        let msg = '初始化失败';
         try {
           const data = await res.json();
           msg = data.error || msg;
@@ -372,17 +305,6 @@
       }
 
       window.location.href = '/?success=true';
-    }
-
-    async function sendTestPush() {
-      const res = await fetch('/test-push');
-      const data = await res.json();
-
-      if (data.success) {
-        alert('已触发测试推送，请查看企业微信');
-      } else {
-        alert(data.msg || '测试推送失败');
-      }
     }
   </script>
 </body>

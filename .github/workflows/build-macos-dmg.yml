@@ -36,7 +36,6 @@ jobs:
           set -e
           rm -rf dist
           mkdir -p dist/backend
-
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build \
             -ldflags "-s -w -X main.Version=${APP_VERSION}" \
             -o dist/backend/nasnotify-go-app ./cmd/nasnotify
@@ -44,7 +43,6 @@ jobs:
       - name: Build Swift menu bar app
         run: |
           set -e
-
           cd macos/NasNotifyGo
           swift build -c release
 
@@ -57,20 +55,23 @@ jobs:
           CONTENTS="${APP_BUNDLE}/Contents"
           MACOS="${CONTENTS}/MacOS"
           RESOURCES="${CONTENTS}/Resources"
+          ICON_ICNS="macos/NasNotifyGo/Sources/NasNotifyGo/Resources/AppIcon.icns"
+          ICON_PNG="macos/NasNotifyGo/Sources/NasNotifyGo/Resources/AppIcon.png"
 
           mkdir -p "${MACOS}" "${RESOURCES}"
 
           cp "macos/NasNotifyGo/.build/release/NasNotifyGo" "${MACOS}/NasNotify-Go"
           cp "dist/backend/nasnotify-go-app" "${RESOURCES}/nasnotify-go-app"
           cp -R templates "${RESOURCES}/templates"
+          cp "${ICON_ICNS}" "${RESOURCES}/AppIcon.icns"
+          cp "${ICON_PNG}" "${RESOURCES}/AppIcon.png"
 
-          cat > "${RESOURCES}/service-runner.sh" <<'EOF'
+          cat > "${RESOURCES}/service-runner.sh" <<'RUNNER'
           #!/bin/bash
           set -e
 
           APP_CONTENTS="$(cd "$(dirname "$0")/.." && pwd)"
           APP_RESOURCES="$APP_CONTENTS/Resources"
-
           APP_SUPPORT="$HOME/Library/Application Support/NasNotify-Go"
           CONFIG_DIR="$APP_SUPPORT/config"
           DATA_DIR="$APP_SUPPORT/data"
@@ -83,56 +84,66 @@ jobs:
           cp -R "$APP_RESOURCES/templates" "$APP_SUPPORT/templates"
 
           cd "$APP_SUPPORT"
-
           exec "$APP_RESOURCES/nasnotify-go-app" >> "$LOG_FILE" 2>&1
-          EOF
+          RUNNER
 
           chmod +x "${MACOS}/NasNotify-Go"
           chmod +x "${RESOURCES}/nasnotify-go-app"
           chmod +x "${RESOURCES}/service-runner.sh"
 
-          cat > "${CONTENTS}/Info.plist" <<EOF
+          cat > "${CONTENTS}/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
             <key>CFBundleName</key>
             <string>NasNotify-Go</string>
+
             <key>CFBundleDisplayName</key>
             <string>NasNotify-Go</string>
+
             <key>CFBundleIdentifier</key>
             <string>com.autunn.nasnotify-go</string>
+
             <key>CFBundleVersion</key>
             <string>${GITHUB_RUN_NUMBER}</string>
+
             <key>CFBundleShortVersionString</key>
             <string>${APP_VERSION#v}</string>
+
             <key>CFBundleExecutable</key>
             <string>NasNotify-Go</string>
+
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
+
             <key>CFBundlePackageType</key>
             <string>APPL</string>
+
             <key>LSMinimumSystemVersion</key>
             <string>11.0</string>
+
             <key>LSUIElement</key>
             <true/>
+
             <key>NSHighResolutionCapable</key>
             <true/>
           </dict>
           </plist>
-          EOF
+          PLIST
+
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "${CONTENTS}/Info.plist"
+          test -f "${RESOURCES}/AppIcon.icns"
 
           codesign --force --deep --sign - "${APP_BUNDLE}"
 
       - name: Build DMG
         run: |
           set -e
-
           rm -rf dmgroot
           mkdir -p dmgroot
-
           cp -R "dist/NasNotify-Go.app" dmgroot/
           ln -s /Applications dmgroot/Applications
-
           hdiutil create \
             -volname "NasNotify-Go" \
             -srcfolder dmgroot \

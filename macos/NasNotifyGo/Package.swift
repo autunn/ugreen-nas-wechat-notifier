@@ -1,5 +1,4 @@
 // swift-tools-version: 5.9
-
 import PackageDescription
 
 let package = Package(
@@ -16,7 +15,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "NasNotifyGo",
-            path: "Sources/NasNotifyGo"
+            path: "Sources/NasNotifyGo",
+            resources: [
+                .process("Resources")
+            ]
         )
     ]
 )
