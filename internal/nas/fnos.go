@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,10 +53,11 @@ func ProcessFnOs() {
 			continue
 		}
 
-		logFile := filepath.Join("data", "log", fmt.Sprintf("%s_%d.log", ip, port))
+		logFile := utils.DeviceLogFile("fnos", cfg.ID, ip, port)
 
 		client := NewFnOsClient()
-		err := client.Connect(cfg.Server, cfg.UseSSL, cfg.Cookie)
+		serverAddress := net.JoinHostPort(ip, strconv.Itoa(port))
+		err := client.Connect(serverAddress, cfg.UseSSL, cfg.Cookie)
 		if err != nil {
 			log.Printf("[飞牛] 连接失败: %v\n", err)
 			continue

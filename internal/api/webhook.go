@@ -201,7 +201,7 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 				go nas.PushUGreenNotifyStatus()
 
 			case "GET_UGREEN_PERF":
-				go notify.WechatPush("️ **性能控制向导**\n\n请直接在聊天框回复以下指令：\n\n **风扇控制**\n「风扇 1」: 静音模式\n「风扇 2」: 正常模式\n「风扇 3」: 全速模式\n\n⚡ **CPU 模式**\n「CPU 0」: 高性能\n「CPU 1」: 均衡\n「CPU 2」: 节能")
+				go notify.WechatPush("️ **性能控制向导**\n\n请直接在聊天框回复以下指令：\n\n **风扇控制**\n「风扇 1 设备名」: 静音模式\n「风扇 2 设备名」: 正常模式\n「风扇 3 设备名」: 全速模式\n\n⚡ **CPU 模式**\n「CPU 0 设备名」: 高性能\n「CPU 1 设备名」: 均衡\n「CPU 2 设备名」: 节能\n\n如果只配置了一台绿联设备，也可以直接省略设备名。")
 
 			case "GET_NAS_WOL":
 				go handleWakeMenuCommand()

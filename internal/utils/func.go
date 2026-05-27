@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"nasnotify-go/internal/notify"
 )
@@ -21,17 +24,73 @@ var (
 	deviceOfflineMu sync.Mutex
 )
 
-// SplitIpPort 拆分 IP 和端口
-func SplitIpPort(ipPort string, defaultPort int) (string, int) {
-	parts := strings.Split(ipPort, ":")
-	ip := parts[0]
-	port := defaultPort
-	if len(parts) > 1 {
-		if p, err := strconv.Atoi(parts[1]); err == nil {
-			port = p
+// SplitIpPort splits an IP address or hostname from its optional port.
+func SplitIpPort(address string, defaultPort int) (string, int) {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return "", defaultPort
+	}
+
+	if strings.Contains(address, "://") {
+		if parsedURL, err := url.Parse(address); err == nil && parsedURL.Host != "" {
+			address = parsedURL.Host
 		}
 	}
-	return ip, port
+
+	if host, portText, err := net.SplitHostPort(address); err == nil {
+		if port, parseErr := strconv.Atoi(portText); parseErr == nil {
+			return host, port
+		}
+		return host, defaultPort
+	}
+
+	if strings.HasPrefix(address, "[") && strings.HasSuffix(address, "]") {
+		return strings.TrimSuffix(strings.TrimPrefix(address, "["), "]"), defaultPort
+	}
+	if net.ParseIP(address) != nil {
+		return address, defaultPort
+	}
+	if strings.Count(address, ":") == 1 {
+		parts := strings.SplitN(address, ":", 2)
+		if port, err := strconv.Atoi(parts[1]); err == nil {
+			return parts[0], port
+		}
+		return parts[0], defaultPort
+	}
+
+	return address, defaultPort
+}
+
+func DeviceLogFile(deviceType, deviceID, host string, port int) string {
+	return filepath.Join(
+		"data",
+		"log",
+		fmt.Sprintf("%s_%s_%s_%d.log",
+			sanitizeLogComponent(deviceType),
+			sanitizeLogComponent(deviceID),
+			sanitizeLogComponent(host),
+			port,
+		),
+	)
+}
+
+func sanitizeLogComponent(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+
+	var builder strings.Builder
+	for _, r := range value {
+		switch {
+		case unicode.IsLetter(r), unicode.IsNumber(r):
+			builder.WriteRune(r)
+		default:
+			builder.WriteByte('_')
+		}
+	}
+
+	return strings.Trim(builder.String(), "_")
 }
 
 // CheckPortOpen 检查设备端口是否开放 (超时时间 2 秒)

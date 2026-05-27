@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -103,20 +104,68 @@ type UGreenStorageItem struct {
 	NotifyPct   int    `json:"capacity_notify_percentage"`
 }
 
+func configuredUGreenDevices() []config.UGreenConfig {
+	return config.GetConfigSnapshot().UGreen
+}
+
+func ugreenDeviceLabel(cfg config.UGreenConfig) string {
+	if name := strings.TrimSpace(cfg.NotifyTypeName); name != "" {
+		return name
+	}
+	if address := strings.TrimSpace(cfg.IpPort); address != "" {
+		return address
+	}
+	return "未命名设备"
+}
+
+func selectUGreenDeviceForControl(devices []config.UGreenConfig, target string) (config.UGreenConfig, error) {
+	target = strings.TrimSpace(target)
+	if len(devices) == 0 {
+		return config.UGreenConfig{}, fmt.Errorf("未配置绿联设备")
+	}
+	if target == "" {
+		if len(devices) == 1 {
+			return devices[0], nil
+		}
+		return config.UGreenConfig{}, fmt.Errorf("检测到多台绿联设备，请在指令末尾追加设备名称，例如：风扇 2 客厅NAS")
+	}
+
+	targetLower := strings.ToLower(target)
+	var matches []config.UGreenConfig
+	for _, cfg := range devices {
+		name := strings.ToLower(strings.TrimSpace(cfg.NotifyTypeName))
+		if strings.Contains(name, targetLower) {
+			matches = append(matches, cfg)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return config.UGreenConfig{}, fmt.Errorf("未找到匹配“%s”的绿联设备", target)
+	case 1:
+		return matches[0], nil
+	default:
+		return config.UGreenConfig{}, fmt.Errorf("匹配到多台绿联设备，请把设备名称写得更具体一些")
+	}
+}
+
 func ProcessUGreen() {
-	if len(config.Config.UGreen) == 0 {
+	devices := configuredUGreenDevices()
+	if len(devices) == 0 {
 		return
 	}
 
-	for _, cfg := range config.Config.UGreen {
+	for _, cfg := range devices {
 		ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
+		log.Printf("[绿联] 开始检查设备: %s (%s:%d, HTTPS=%t)\n", ugreenDeviceLabel(cfg), ip, port, cfg.UseSSL)
 		if !utils.HandleDeviceStatus("绿联", cfg.NotifyTypeName, ip, port) {
 			continue
 		}
 
-		logFile := filepath.Join("data", "log", fmt.Sprintf("%s_%d.log", ip, port))
+		logFile := utils.DeviceLogFile("ugreen", cfg.ID, ip, port)
 		authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 		if authInfo == nil {
+			log.Printf("[绿联] %s 登录失败，未能获取认证信息\n", ugreenDeviceLabel(cfg))
 			continue
 		}
 
@@ -124,11 +173,16 @@ func ProcessUGreen() {
 		if err == nil && code != 200 {
 			authInfo, err = loginUGreen(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 			if err == nil {
-				notices, _, err = fetchUGreenNotices(authInfo, ip, port, cfg.UseSSL)
+				notices, code, err = fetchUGreenNotices(authInfo, ip, port, cfg.UseSSL)
 			}
 		}
 
 		if err != nil {
+			log.Printf("[绿联] %s 获取通知失败: %v\n", ugreenDeviceLabel(cfg), err)
+			continue
+		}
+		if code != 200 {
+			log.Printf("[绿联] %s 获取通知失败: API 返回代码 %d\n", ugreenDeviceLabel(cfg), code)
 			continue
 		}
 
@@ -155,24 +209,34 @@ func ProcessUGreen() {
 				notify.WechatPush(pushContent)
 			}
 		}
+		if len(newNotices) == 0 {
+			log.Printf("[绿联] %s 没有新的通知\n", ugreenDeviceLabel(cfg))
+		}
 	}
 }
 
 func PushUGreenSystemStatus() {
-	if len(config.Config.UGreen) == 0 {
-		return
+	for _, cfg := range configuredUGreenDevices() {
+		pushUGreenSystemStatus(cfg)
 	}
-	cfg := config.Config.UGreen[0]
+}
+
+func pushUGreenSystemStatus(cfg config.UGreenConfig) {
 	ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
 	authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 	if authInfo == nil {
+		log.Printf("[绿联] %s 获取系统概览失败: 登录失败\n", ugreenDeviceLabel(cfg))
 		return
 	}
 
 	info, err := fetchUGreenSystemInfo(authInfo, ip, port, cfg.UseSSL)
 	if err != nil {
 		authInfo = ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
-		info, _ = fetchUGreenSystemInfo(authInfo, ip, port, cfg.UseSSL)
+		info, err = fetchUGreenSystemInfo(authInfo, ip, port, cfg.UseSSL)
+	}
+	if err != nil || info == nil {
+		log.Printf("[绿联] %s 获取系统概览失败: %v\n", ugreenDeviceLabel(cfg), err)
+		return
 	}
 
 	pushContent := buildUGreenSystemStatusPushContent(info, cfg.NotifyTypeName)
@@ -182,13 +246,16 @@ func PushUGreenSystemStatus() {
 }
 
 func PushUGreenStorageStatus() {
-	if len(config.Config.UGreen) == 0 {
-		return
+	for _, cfg := range configuredUGreenDevices() {
+		pushUGreenStorageStatus(cfg)
 	}
-	cfg := config.Config.UGreen[0]
+}
+
+func pushUGreenStorageStatus(cfg config.UGreenConfig) {
 	ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
 	authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 	if authInfo == nil {
+		log.Printf("[绿联] %s 获取存储状态失败: 登录失败\n", ugreenDeviceLabel(cfg))
 		return
 	}
 
@@ -263,13 +330,16 @@ func PushUGreenStorageStatus() {
 }
 
 func PushUGreenUpsStatus() {
-	if len(config.Config.UGreen) == 0 {
-		return
+	for _, cfg := range configuredUGreenDevices() {
+		pushUGreenUpsStatus(cfg)
 	}
-	cfg := config.Config.UGreen[0]
+}
+
+func pushUGreenUpsStatus(cfg config.UGreenConfig) {
 	ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
 	authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 	if authInfo == nil {
+		log.Printf("[绿联] %s 获取 UPS 状态失败: 登录失败\n", ugreenDeviceLabel(cfg))
 		return
 	}
 
@@ -316,7 +386,7 @@ func PushUGreenUpsStatus() {
 	}
 
 	var builder strings.Builder
-	builder.WriteString("🔋 UPS 电源状态\n")
+	builder.WriteString(fmt.Sprintf("🔋 %s UPS 电源状态\n", cfg.NotifyTypeName))
 	builder.WriteString(strings.Repeat("-", 22) + "\n")
 
 	if usb.UsbUpsInsert {
@@ -375,32 +445,42 @@ func PushUGreenUpsStatus() {
 }
 
 func PushUGreenNotifyStatus() {
-	if len(config.Config.UGreen) == 0 {
-		return
+	for _, cfg := range configuredUGreenDevices() {
+		pushUGreenNotifyStatus(cfg)
 	}
-	cfg := config.Config.UGreen[0]
+}
+
+func pushUGreenNotifyStatus(cfg config.UGreenConfig) {
 	ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
 	authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 	if authInfo == nil {
+		log.Printf("[绿联] %s 获取系统通知失败: 登录失败\n", ugreenDeviceLabel(cfg))
 		return
 	}
 
-	notices, _, _ := fetchUGreenNotices(authInfo, ip, port, cfg.UseSSL)
+	notices, code, err := fetchUGreenNotices(authInfo, ip, port, cfg.UseSSL)
+	if err != nil || code != 200 {
+		log.Printf("[绿联] %s 获取系统通知失败: code=%d, err=%v\n", ugreenDeviceLabel(cfg), code, err)
+		return
+	}
 	if len(notices) > 0 {
 		notify.WechatPush(buildUGreenPushContent(notices, cfg.NotifyTypeName+" 近期通知"))
 	} else {
-		notify.WechatPush("当前没有新的系统通知。")
+		notify.WechatPush(fmt.Sprintf("%s 当前没有新的系统通知。", cfg.NotifyTypeName))
 	}
 }
 
 func PushUGreenDockerStatus() {
-	if len(config.Config.UGreen) == 0 {
-		return
+	for _, cfg := range configuredUGreenDevices() {
+		pushUGreenDockerStatus(cfg)
 	}
-	cfg := config.Config.UGreen[0]
+}
+
+func pushUGreenDockerStatus(cfg config.UGreenConfig) {
 	ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
 	authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 	if authInfo == nil {
+		log.Printf("[绿联] %s 获取 Docker 状态失败: 登录失败\n", ugreenDeviceLabel(cfg))
 		return
 	}
 
@@ -427,7 +507,7 @@ func PushUGreenDockerStatus() {
 	json.Unmarshal(listRaw, &list)
 
 	var builder strings.Builder
-	builder.WriteString("🐳 Docker 运行概览\n")
+	builder.WriteString(fmt.Sprintf("🐳 %s Docker 运行概览\n", cfg.NotifyTypeName))
 	builder.WriteString(strings.Repeat("-", 22) + "\n")
 	builder.WriteString(fmt.Sprintf("运行中容器: %d / %d\n", overview.RunContainerCount, overview.ContainerCount))
 	builder.WriteString(fmt.Sprintf("本地镜像数: %d\n", overview.ImageCount))
@@ -449,13 +529,16 @@ func PushUGreenDockerStatus() {
 }
 
 func PushUGreenPsStatus() {
-	if len(config.Config.UGreen) == 0 {
-		return
+	for _, cfg := range configuredUGreenDevices() {
+		pushUGreenPsStatus(cfg)
 	}
-	cfg := config.Config.UGreen[0]
+}
+
+func pushUGreenPsStatus(cfg config.UGreenConfig) {
 	ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
 	authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 	if authInfo == nil {
+		log.Printf("[绿联] %s 获取进程列表失败: 登录失败\n", ugreenDeviceLabel(cfg))
 		return
 	}
 
@@ -490,7 +573,7 @@ func PushUGreenPsStatus() {
 	})
 
 	var builder strings.Builder
-	builder.WriteString("📈 系统进程占用 (TOP 5)\n")
+	builder.WriteString(fmt.Sprintf("📈 %s 系统进程占用 (TOP 5)\n", cfg.NotifyTypeName))
 	builder.WriteString(strings.Repeat("-", 22) + "\n")
 	for i, p := range allProcs {
 		if i >= 5 {
@@ -503,13 +586,16 @@ func PushUGreenPsStatus() {
 }
 
 func PushUGreenBackupStatus() {
-	if len(config.Config.UGreen) == 0 {
-		return
+	for _, cfg := range configuredUGreenDevices() {
+		pushUGreenBackupStatus(cfg)
 	}
-	cfg := config.Config.UGreen[0]
+}
+
+func pushUGreenBackupStatus(cfg config.UGreenConfig) {
 	ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
 	authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 	if authInfo == nil {
+		log.Printf("[绿联] %s 获取备份任务失败: 登录失败\n", ugreenDeviceLabel(cfg))
 		return
 	}
 
@@ -529,7 +615,7 @@ func PushUGreenBackupStatus() {
 	json.Unmarshal(raw, &result)
 
 	var builder strings.Builder
-	builder.WriteString("🔄 备份任务状态\n")
+	builder.WriteString(fmt.Sprintf("🔄 %s 备份任务状态\n", cfg.NotifyTypeName))
 	builder.WriteString(strings.Repeat("-", 22) + "\n")
 	if len(result.List) == 0 {
 		builder.WriteString("当前没有配置备份任务\n")
@@ -559,13 +645,16 @@ func PushUGreenBackupStatus() {
 }
 
 func PushUGreenPowerStatus() {
-	if len(config.Config.UGreen) == 0 {
-		return
+	for _, cfg := range configuredUGreenDevices() {
+		pushUGreenPowerStatus(cfg)
 	}
-	cfg := config.Config.UGreen[0]
+}
+
+func pushUGreenPowerStatus(cfg config.UGreenConfig) {
 	ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
 	authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 	if authInfo == nil {
+		log.Printf("[绿联] %s 获取电源配置失败: 登录失败\n", ugreenDeviceLabel(cfg))
 		return
 	}
 
@@ -597,7 +686,7 @@ func PushUGreenPowerStatus() {
 	}
 
 	var builder strings.Builder
-	builder.WriteString("⚡ 电源与休眠配置\n")
+	builder.WriteString(fmt.Sprintf("⚡ %s 电源与休眠配置\n", cfg.NotifyTypeName))
 	builder.WriteString(strings.Repeat("-", 22) + "\n")
 
 	statusMap := func(b bool) string {
@@ -625,48 +714,65 @@ func PushUGreenPowerStatus() {
 }
 
 func HandleUGreenPerfCommand(command string) {
-	if len(config.Config.UGreen) == 0 {
+	devices := configuredUGreenDevices()
+	if len(devices) == 0 {
 		return
 	}
-	cfg := config.Config.UGreen[0]
+
+	fields := strings.Fields(strings.TrimSpace(command))
+	if len(fields) < 2 {
+		notify.WechatPush("⚠️ 指令格式错误，请发送类似：风扇 2 客厅NAS 或 CPU 1 客厅NAS")
+		return
+	}
+
+	action := strings.ToUpper(fields[0])
+	modeStr := fields[1]
+	targetName := ""
+	if len(fields) > 2 {
+		targetName = strings.Join(fields[2:], " ")
+	}
+
+	cfg, err := selectUGreenDeviceForControl(devices, targetName)
+	if err != nil {
+		notify.WechatPush("⚠️ " + err.Error())
+		return
+	}
+
 	ip, port := utils.SplitIpPort(cfg.IpPort, 9999)
 	authInfo := ensureAuth(cfg.Username, cfg.Password, ip, port, cfg.UseSSL)
 	if authInfo == nil {
-		notify.WechatPush("❌ 控制指令失败：登录凭证无效")
+		notify.WechatPush(fmt.Sprintf("❌ %s 控制指令失败：登录凭证无效", ugreenDeviceLabel(cfg)))
 		return
 	}
 
-	upperCommand := strings.ToUpper(strings.TrimSpace(command))
-	isFan := strings.HasPrefix(upperCommand, "风扇")
-	isCPU := strings.HasPrefix(upperCommand, "CPU")
-
 	var successMsg string
-	var err error
+	var execErr error
 
-	if isFan {
-		modeStr := strings.TrimSpace(strings.TrimPrefix(upperCommand, "风扇"))
+	if action == "风扇" || action == "FAN" {
 		mode, _ := strconv.Atoi(modeStr)
 		if mode < 1 || mode > 3 {
-			notify.WechatPush("⚠️ 风扇指令格式错误。\n1: 静音 | 2: 正常 | 3: 全速\n例如: 风扇 2")
+			notify.WechatPush("⚠️ 风扇指令格式错误。\n1: 静音 | 2: 正常 | 3: 全速\n例如: 风扇 2 客厅NAS")
 			return
 		}
-		_, err = requestUGreenDeepAPI(authInfo, ip, port, cfg.UseSSL, "GET", "/ugreen/v1/hardware/fan/start", map[string]string{"mode": strconv.Itoa(mode)}, nil)
+		_, execErr = requestUGreenDeepAPI(authInfo, ip, port, cfg.UseSSL, "GET", "/ugreen/v1/hardware/fan/start", map[string]string{"mode": strconv.Itoa(mode)}, nil)
 		modes := map[int]string{1: "静音", 2: "正常", 3: "全速"}
-		successMsg = fmt.Sprintf("🌀 风扇模式已成功切换为: %s", modes[mode])
-	} else if isCPU {
-		modeStr := strings.TrimSpace(strings.TrimPrefix(upperCommand, "CPU"))
+		successMsg = fmt.Sprintf("🌀 %s 风扇模式已成功切换为: %s", ugreenDeviceLabel(cfg), modes[mode])
+	} else if action == "CPU" {
 		mode, _ := strconv.Atoi(modeStr)
 		if mode < 0 || mode > 2 {
-			notify.WechatPush("⚠️ CPU指令格式错误。\n0: 高性能 | 1: 均衡 | 2: 节能\n例如: CPU 1")
+			notify.WechatPush("⚠️ CPU指令格式错误。\n0: 高性能 | 1: 均衡 | 2: 节能\n例如: CPU 1 客厅NAS")
 			return
 		}
-		_, err = requestUGreenDeepAPI(authInfo, ip, port, cfg.UseSSL, "POST", "/ugreen/v1/hardware/cpu/frequency", nil, map[string]interface{}{"frequency": mode})
+		_, execErr = requestUGreenDeepAPI(authInfo, ip, port, cfg.UseSSL, "POST", "/ugreen/v1/hardware/cpu/frequency", nil, map[string]interface{}{"frequency": mode})
 		modes := map[int]string{0: "高性能", 1: "均衡", 2: "节能"}
-		successMsg = fmt.Sprintf("⚡ CPU 模式已成功切换为: %s", modes[mode])
+		successMsg = fmt.Sprintf("⚡ %s CPU 模式已成功切换为: %s", ugreenDeviceLabel(cfg), modes[mode])
+	} else {
+		notify.WechatPush("⚠️ 指令类型不支持，请发送“风扇 ...”或“CPU ...”")
+		return
 	}
 
-	if err != nil {
-		notify.WechatPush(fmt.Sprintf("❌ 指令执行失败: %v", err))
+	if execErr != nil {
+		notify.WechatPush(fmt.Sprintf("❌ %s 指令执行失败: %v", ugreenDeviceLabel(cfg), execErr))
 	} else {
 		notify.WechatPush(successMsg)
 	}
@@ -802,7 +908,10 @@ func ensureAuth(username, password, ip string, port int, useSSL bool) *UGreenAut
 	if authInfo != nil && authInfo.PublicKey != "" && authInfo.CookieStr != "" {
 		return authInfo
 	}
-	newAuth, _ := loginUGreen(username, password, ip, port, useSSL)
+	newAuth, err := loginUGreen(username, password, ip, port, useSSL)
+	if err != nil {
+		log.Printf("[绿联] %s:%d 登录失败: %v\n", ip, port, err)
+	}
 	return newAuth
 }
 
@@ -815,6 +924,7 @@ func loginUGreen(username, password, ip string, port int, useSSL bool) (*UGreenA
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{
 		Jar:       jar,
+		Timeout:   10 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 	}
 
@@ -902,7 +1012,7 @@ func fetchUGreenNotices(authInfo *UGreenAuthInfo, ip string, port int, useSSL bo
 		req.Header.Set("Cookie", authInfo.CookieStr)
 	}
 
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err

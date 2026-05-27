@@ -831,8 +831,8 @@
                   </div>
 
                   <div class="field">
-                    <label data-address-label>设备地址</label>
-                    <input type="text" data-field="address" placeholder="192.168.1.10:5055">
+                    <label data-address-label>IP/域名:端口</label>
+                    <input type="text" data-field="address" placeholder="nas.example.com:5055">
                   </div>
 
                   <div class="field full device-brand-field" data-brand-block data-brands="zspace" hidden>
@@ -845,12 +845,12 @@
                     <input type="text" data-field="mac" placeholder="AA:BB:CC:DD:EE:FF">
                   </div>
 
-                  <div class="field device-brand-field" data-brand-block data-brands="ugreen,fnos" hidden>
+                  <div class="field device-brand-field" data-brand-block data-brands="ugreen" hidden>
                     <label>账号</label>
                     <input type="text" data-field="ugreen_username" placeholder="登录账号">
                   </div>
 
-                  <div class="field device-brand-field" data-brand-block data-brands="ugreen,fnos" hidden>
+                  <div class="field device-brand-field" data-brand-block data-brands="ugreen" hidden>
                     <label>密码</label>
                     <input type="password" data-field="ugreen_password" placeholder="登录密码">
                   </div>
@@ -1231,22 +1231,22 @@
         label: '极空间 ZSpace',
         short: 'Z',
         desc: '通过 Cookie 读取通知',
-        addressLabel: '设备 IP:端口',
-        addressPlaceholder: '192.168.1.10:5055'
+        addressLabel: '设备 IP/域名:端口',
+        addressPlaceholder: 'nas.example.com:5055'
       },
       ugreen: {
         label: '绿联 UGreen',
         short: 'U',
         desc: '通过账号密码登录并抓取通知',
-        addressLabel: '设备 IP:端口',
-        addressPlaceholder: '192.168.1.20:9443'
+        addressLabel: '设备 IP/域名:端口',
+        addressPlaceholder: 'nas.example.com:9443'
       },
       fnos: {
         label: '飞牛 FnOS',
         short: 'F',
         desc: '通过账号密码登录并抓取通知',
-        addressLabel: '服务器地址',
-        addressPlaceholder: '192.168.1.30:5666'
+        addressLabel: '服务器 IP/域名:端口',
+        addressPlaceholder: 'nas.example.com:5666'
       }
     };
 
@@ -1287,8 +1287,10 @@
       getNasField(card, 'name').value = device.notify_type_name || '';
       getNasField(card, 'address').value = device.ip_port || device.server || '';
       getNasField(card, 'zspace_cookie').value = device.cookie || '';
-      getNasField(card, 'ugreen_username').value = device.username || '';
-      getNasField(card, 'ugreen_password').value = device.password || '';
+      getNasField(card, 'ugreen_username').value = brand === 'ugreen' ? (device.username || '') : '';
+      getNasField(card, 'ugreen_password').value = brand === 'ugreen' ? (device.password || '') : '';
+      getNasField(card, 'fnos_username').value = brand === 'fnos' ? (device.username || '') : '';
+      getNasField(card, 'fnos_password').value = brand === 'fnos' ? (device.password || '') : '';
       getNasField(card, 'fnos_cookie').value = device.cookie || '';
       getNasField(card, 'mac').value = device.mac_address || '';
       getNasField(card, 'use_ssl').checked = !!device.use_ssl;

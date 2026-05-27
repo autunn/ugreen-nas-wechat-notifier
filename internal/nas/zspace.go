@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,7 +41,7 @@ func ProcessZSpace() {
 			continue
 		}
 
-		logFile := filepath.Join("data", "log", fmt.Sprintf("%s_%d.log", ip, port))
+		logFile := utils.DeviceLogFile("zspace", cfg.ID, ip, port)
 
 		// 1. 获取最新通知
 		notices, err := fetchZSpaceNotices(cfg.Cookie, ip, port, cfg.UseSSL)
