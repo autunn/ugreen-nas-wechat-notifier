@@ -31,9 +31,6 @@ RUN apk add --no-cache ca-certificates tzdata \
 
 # 把极速编译好的二进制文件复制过来
 COPY --from=builder /app/nasnotify-go-app .
-# 复制前端模板文件夹
-COPY templates ./templates
-
 EXPOSE 5080
 VOLUME ["/app/data", "/app/config"]
 CMD ["./nasnotify-go-app"]

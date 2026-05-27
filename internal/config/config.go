@@ -1,11 +1,16 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 )
 
 const ConfigPath = "config/config.json"
@@ -53,29 +58,15 @@ func MergeWithExistingSensitiveFields(existing, incoming AppConfig) AppConfig {
 		incoming.EncodingAESKey = existing.EncodingAESKey
 	}
 
-	if len(incoming.ZSpace) == 1 && len(existing.ZSpace) > 0 {
-		if incoming.ZSpace[0].Cookie == "" {
-			incoming.ZSpace[0].Cookie = existing.ZSpace[0].Cookie
-		}
-	}
-	if len(incoming.UGreen) == 1 && len(existing.UGreen) > 0 {
-		if incoming.UGreen[0].Password == "" {
-			incoming.UGreen[0].Password = existing.UGreen[0].Password
-		}
-	}
-	if len(incoming.FnOs) == 1 && len(existing.FnOs) > 0 {
-		if incoming.FnOs[0].Password == "" {
-			incoming.FnOs[0].Password = existing.FnOs[0].Password
-		}
-		if incoming.FnOs[0].Cookie == "" {
-			incoming.FnOs[0].Cookie = existing.FnOs[0].Cookie
-		}
-	}
+	incoming.ZSpace = mergeZSpaceSensitive(existing.ZSpace, incoming.ZSpace)
+	incoming.UGreen = mergeUGreenSensitive(existing.UGreen, incoming.UGreen)
+	incoming.FnOs = mergeFnOsSensitive(existing.FnOs, incoming.FnOs)
 
 	return incoming
 }
 
 type ZSpaceConfig struct {
+	ID             string `json:"id,omitempty"`
 	IpPort         string `json:"ip_port"`
 	Cookie         string `json:"cookie"`
 	NotifyTypeName string `json:"notify_type_name"`
@@ -84,6 +75,7 @@ type ZSpaceConfig struct {
 }
 
 type UGreenConfig struct {
+	ID             string `json:"id,omitempty"`
 	IpPort         string `json:"ip_port"`
 	Username       string `json:"username"`
 	Password       string `json:"password"`
@@ -93,6 +85,7 @@ type UGreenConfig struct {
 }
 
 type FnOsConfig struct {
+	ID             string `json:"id,omitempty"`
 	Server         string `json:"server"`
 	Username       string `json:"username"`
 	Password       string `json:"password"`
@@ -230,6 +223,11 @@ func normalizeConfigLocked() {
 	if Config.FnOs == nil {
 		Config.FnOs = []FnOsConfig{}
 	}
+
+	usedIDs := map[string]struct{}{}
+	Config.ZSpace = ensureZSpaceIDs(Config.ZSpace, usedIDs)
+	Config.UGreen = ensureUGreenIDs(Config.UGreen, usedIDs)
+	Config.FnOs = ensureFnOsIDs(Config.FnOs, usedIDs)
 }
 
 func cloneZSpace(in []ZSpaceConfig) []ZSpaceConfig {
@@ -257,4 +255,153 @@ func cloneFnOs(in []FnOsConfig) []FnOsConfig {
 	out := make([]FnOsConfig, len(in))
 	copy(out, in)
 	return out
+}
+
+func mergeZSpaceSensitive(existing, incoming []ZSpaceConfig) []ZSpaceConfig {
+	if len(existing) == 0 || len(incoming) == 0 {
+		return incoming
+	}
+
+	if len(existing) == 1 && len(incoming) == 1 && strings.TrimSpace(incoming[0].ID) == "" {
+		if incoming[0].Cookie == "" {
+			incoming[0].Cookie = existing[0].Cookie
+		}
+		return incoming
+	}
+
+	existingByID := make(map[string]ZSpaceConfig, len(existing))
+	for _, item := range existing {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			existingByID[id] = item
+		}
+	}
+
+	for i := range incoming {
+		id := strings.TrimSpace(incoming[i].ID)
+		if id == "" {
+			continue
+		}
+		if old, ok := existingByID[id]; ok && incoming[i].Cookie == "" {
+			incoming[i].Cookie = old.Cookie
+		}
+	}
+	return incoming
+}
+
+func mergeUGreenSensitive(existing, incoming []UGreenConfig) []UGreenConfig {
+	if len(existing) == 0 || len(incoming) == 0 {
+		return incoming
+	}
+
+	if len(existing) == 1 && len(incoming) == 1 && strings.TrimSpace(incoming[0].ID) == "" {
+		if incoming[0].Password == "" {
+			incoming[0].Password = existing[0].Password
+		}
+		return incoming
+	}
+
+	existingByID := make(map[string]UGreenConfig, len(existing))
+	for _, item := range existing {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			existingByID[id] = item
+		}
+	}
+
+	for i := range incoming {
+		id := strings.TrimSpace(incoming[i].ID)
+		if id == "" {
+			continue
+		}
+		if old, ok := existingByID[id]; ok && incoming[i].Password == "" {
+			incoming[i].Password = old.Password
+		}
+	}
+	return incoming
+}
+
+func mergeFnOsSensitive(existing, incoming []FnOsConfig) []FnOsConfig {
+	if len(existing) == 0 || len(incoming) == 0 {
+		return incoming
+	}
+
+	if len(existing) == 1 && len(incoming) == 1 && strings.TrimSpace(incoming[0].ID) == "" {
+		if incoming[0].Password == "" {
+			incoming[0].Password = existing[0].Password
+		}
+		if incoming[0].Cookie == "" {
+			incoming[0].Cookie = existing[0].Cookie
+		}
+		return incoming
+	}
+
+	existingByID := make(map[string]FnOsConfig, len(existing))
+	for _, item := range existing {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			existingByID[id] = item
+		}
+	}
+
+	for i := range incoming {
+		id := strings.TrimSpace(incoming[i].ID)
+		if id == "" {
+			continue
+		}
+		if old, ok := existingByID[id]; ok {
+			if incoming[i].Password == "" {
+				incoming[i].Password = old.Password
+			}
+			if incoming[i].Cookie == "" {
+				incoming[i].Cookie = old.Cookie
+			}
+		}
+	}
+	return incoming
+}
+
+func ensureZSpaceIDs(items []ZSpaceConfig, used map[string]struct{}) []ZSpaceConfig {
+	for i := range items {
+		items[i].ID = ensureConfigID(items[i].ID, used)
+	}
+	return items
+}
+
+func ensureUGreenIDs(items []UGreenConfig, used map[string]struct{}) []UGreenConfig {
+	for i := range items {
+		items[i].ID = ensureConfigID(items[i].ID, used)
+	}
+	return items
+}
+
+func ensureFnOsIDs(items []FnOsConfig, used map[string]struct{}) []FnOsConfig {
+	for i := range items {
+		items[i].ID = ensureConfigID(items[i].ID, used)
+	}
+	return items
+}
+
+func ensureConfigID(current string, used map[string]struct{}) string {
+	id := strings.TrimSpace(current)
+	if id != "" {
+		if _, exists := used[id]; !exists {
+			used[id] = struct{}{}
+			return id
+		}
+	}
+
+	for {
+		generated := randomConfigID()
+		if _, exists := used[generated]; exists {
+			continue
+		}
+		used[generated] = struct{}{}
+		return generated
+	}
+}
+
+func randomConfigID() string {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }

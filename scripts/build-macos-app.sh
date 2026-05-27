@@ -49,10 +49,6 @@ cp "$SWIFT_BIN" "$APP_DIR/Contents/MacOS/NasNotifyGo"
 cp "$BUILD_DIR/nasnotify-go-app" "$APP_DIR/Contents/Resources/nasnotify-go-app"
 cp "$ICON_ICNS" "$APP_DIR/Contents/Resources/AppIcon.icns"
 
-if [[ -d "$ROOT_DIR/templates" ]]; then
-  cp -R "$ROOT_DIR/templates" "$APP_DIR/Contents/Resources/templates"
-fi
-
 cat > "$APP_DIR/Contents/Resources/service-runner.sh" <<'RUNNER'
 #!/usr/bin/env bash
 set -euo pipefail

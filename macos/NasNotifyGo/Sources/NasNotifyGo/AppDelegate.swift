@@ -203,17 +203,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try fm.createDirectory(at: dataURL, withIntermediateDirectories: true)
             try fm.createDirectory(at: logDirURL, withIntermediateDirectories: true)
             try fm.createDirectory(at: launchAgentsURL, withIntermediateDirectories: true)
-
-            let bundledTemplates = resourcesURL.appendingPathComponent("templates")
-            let targetTemplates = appSupportURL.appendingPathComponent("templates")
-
-            if fm.fileExists(atPath: bundledTemplates.path) {
-                if fm.fileExists(atPath: targetTemplates.path) {
-                    try fm.removeItem(at: targetTemplates)
-                }
-
-                try fm.copyItem(at: bundledTemplates, to: targetTemplates)
-            }
         } catch {
             alert("初始化目录失败", error.localizedDescription)
         }

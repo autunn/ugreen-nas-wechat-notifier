@@ -19,6 +19,7 @@ import (
 	"nasnotify-go/internal/config"
 	"nasnotify-go/internal/nas"
 	"nasnotify-go/internal/notify"
+	embeddedtemplates "nasnotify-go/templates"
 )
 
 var sessionToken string
@@ -72,7 +73,7 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	r.LoadHTMLGlob("templates/*")
+	loadEmbeddedTemplates(r)
 
 	// 企业微信回调仍然公开
 	r.GET("/wx-receive", api.HandleVerify)
@@ -92,9 +93,13 @@ func main() {
 			prefillToken = c.Query("token")
 		}
 
+		webConfig := config.SanitizedConfigForWeb()
+		configJsonBytes, _ := json.Marshal(webConfig)
+
 		c.HTML(http.StatusOK, "setup.html", gin.H{
 			"version":    Version,
 			"setupToken": prefillToken,
+			"configJson": template.JS(configJsonBytes),
 		})
 	})
 
@@ -306,6 +311,10 @@ func secureCompare(a, b string) bool {
 	}
 
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func loadEmbeddedTemplates(r *gin.Engine) {
+	r.SetHTMLTemplate(embeddedtemplates.MustParse())
 }
 
 func randomHex(byteLen int) string {

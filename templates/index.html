@@ -1,258 +1,1072 @@
- <meta name="viewport" content="width=device-width, initial-scale=1">
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>控制台 - NasNotify Go</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body {
-      background: #f4f6f9;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      display: flex;
-      justify-content: center;
-      margin: 0;
-      padding: 20px;
+    :root {
+      --bg: #f3f7ff;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --primary: #2563eb;
+      --primary2: #06b6d4;
+      --soft: #eff6ff;
+      --success-bg: #dcfce7;
+      --success-border: #bbf7d0;
+      --success-text: #166534;
+      --danger-bg: #fef2f2;
+      --danger-border: #fecaca;
+      --danger-text: #991b1b;
+      --shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+    }
+
+    * {
       box-sizing: border-box;
     }
 
-    .container {
-      background: white;
-      padding: 30px;
-      border-radius: 12px;
-      width: 100%;
-      max-width: 600px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-      position: relative;
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.22), transparent 32%),
+        radial-gradient(circle at top right, rgba(6, 182, 212, 0.22), transparent 28%),
+        linear-gradient(135deg, #f8fbff 0%, var(--bg) 100%);
+      padding: 28px;
     }
 
-    .header {
+    .layout {
+      width: 100%;
+      max-width: 1120px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .hero {
+      position: sticky;
+      top: 28px;
+      min-height: calc(100vh - 56px);
+      padding: 32px;
+      border-radius: 30px;
+      color: white;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 18% 18%, rgba(125, 211, 252, 0.45), transparent 30%),
+        linear-gradient(160deg, #0f172a 0%, #1d4ed8 55%, #0891b2 100%);
+      box-shadow: var(--shadow);
+    }
+
+    .brand {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 25px;
-      border-bottom: 1px solid #f1f5f9;
-      padding-bottom: 15px;
+      gap: 14px;
+      margin-bottom: 42px;
     }
 
-    .logo {
-      height: 1.2em;
-      width: 1.2em;
-      object-fit: contain;
-      border-radius: 4px;
+    .brand-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 18px;
+      display: grid;
+      place-items: center;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(10px);
     }
 
-    h2 {
+    .brand-icon svg {
+      width: 36px;
+      height: 36px;
+    }
+
+    .brand-title {
+      font-size: 20px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-subtitle {
+      margin-top: 3px;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.68);
+    }
+
+    .hero h1 {
       margin: 0;
-      font-size: 1.4rem;
-      color: #1e293b;
+      font-size: 38px;
+      line-height: 1.08;
+      letter-spacing: -0.04em;
+    }
+
+    .hero p {
+      margin: 18px 0 0;
+      color: rgba(255, 255, 255, 0.76);
+      line-height: 1.8;
+      font-size: 15px;
+    }
+
+    .steps {
+      margin-top: 36px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .step {
+      display: flex;
+      gap: 12px;
+      padding: 14px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      backdrop-filter: blur(12px);
+    }
+
+    .step-num {
+      width: 26px;
+      height: 26px;
+      flex: 0 0 26px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      font-weight: 900;
+      background: rgba(255, 255, 255, 0.22);
+    }
+
+    .step-title {
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .step-desc {
+      margin-top: 3px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: rgba(255, 255, 255, 0.62);
+    }
+
+    .version {
+      position: absolute;
+      left: 32px;
+      bottom: 28px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.52);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    .panel {
+      border-radius: 30px;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(226, 232, 240, 0.8);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(16px);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      padding: 30px 34px 22px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.72));
+    }
+
+    .panel-header-main {
+      min-width: 0;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 900;
+      margin-bottom: 14px;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+    }
+
+    .panel-desc {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
     }
 
     .logout {
-      position: absolute;
-      top: 30px;
-      right: 30px;
+      flex: 0 0 auto;
       color: #ef4444;
       text-decoration: none;
-      font-size: 14px;
-      font-weight: 600;
-    }
-
-    .group {
-      margin-bottom: 15px;
-    }
-
-    label {
-      display: block;
       font-size: 13px;
-      font-weight: 600;
-      color: #64748b;
-      margin-bottom: 6px;
+      font-weight: 800;
+      margin-top: 6px;
     }
 
-    input[type="text"],
-    input[type="password"],
-    input[type="number"] {
-      width: 100%;
-      padding: 10px;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      box-sizing: border-box;
-      font-size: 14px;
+    form {
+      padding: 30px 34px 34px;
     }
 
-    button {
-      width: 100%;
-      padding: 12px;
-      background: #2563eb;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-      margin-top: 20px;
-      font-size: 16px;
+    .error {
+      display: none;
+      margin-bottom: 16px;
+      padding: 13px 15px;
+      border-radius: 16px;
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      color: var(--danger-text);
+      font-size: 13px;
+      line-height: 1.5;
     }
 
-    button:hover {
-      background: #1d4ed8;
+    .error.show {
+      display: block;
     }
 
     .success-msg {
-      background: #dcfce7;
-      color: #166534;
-      padding: 12px;
-      border-radius: 6px;
-      margin-bottom: 20px;
-      text-align: center;
+      margin-bottom: 16px;
+      padding: 13px 15px;
+      border-radius: 16px;
+      background: var(--success-bg);
+      border: 1px solid var(--success-border);
+      color: var(--success-text);
       font-size: 14px;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    .section {
+      margin-top: 30px;
+    }
+
+    .section:first-of-type {
+      margin-top: 0;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 15px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary), var(--primary2));
+      box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.1);
     }
 
     .hint {
       color: #94a3b8;
       font-size: 12px;
-      margin-top: 6px;
       line-height: 1.5;
     }
 
-    .section-title {
-      margin-top: 30px;
-      margin-bottom: 15px;
-      font-size: 16px;
-      color: #0f172a;
-      border-left: 4px solid #2563eb;
-      padding-left: 8px;
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
     }
 
-    .switch-row {
+    .field {
+      display: grid;
+      gap: 7px;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      font-size: 12px;
+      font-weight: 800;
+      color: #475569;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    select {
+      width: 100%;
+      height: 46px;
+      padding: 0 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.9);
+      color: var(--text);
+      outline: none;
+      font-size: 14px;
+      transition: 0.18s ease;
+    }
+
+    input::placeholder {
+      color: #a8b2c3;
+    }
+
+    input:focus {
+      border-color: rgba(37, 99, 235, 0.7);
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+      background: white;
+    }
+
+    .nas-list {
+      display: grid;
+      gap: 14px;
+    }
+
+    .nas-card {
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: rgba(255,255,255,0.74);
+      overflow: hidden;
+    }
+
+    .nas-tools {
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
-      font-weight: bold;
-      color: #1e293b;
+      justify-content: flex-end;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .device-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px;
+    }
+
+    .device-title {
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .device-desc {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .device-body {
+      padding: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .device-brand-field[hidden] {
+      display: none !important;
+    }
+
+    .nas-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px;
       cursor: pointer;
-      padding: 10px;
-      background: #f8fafc;
-      border-radius: 6px;
-      border: 1px solid #e2e8f0;
+      user-select: none;
+    }
+
+    .nas-info {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+    }
+
+    .nas-badge {
+      width: 40px;
+      height: 40px;
+      border-radius: 15px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, #eff6ff, #ecfeff);
+      color: var(--primary);
+      font-weight: 900;
+    }
+
+    .nas-name {
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .nas-desc {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .switch {
+      position: relative;
+      width: 46px;
+      height: 26px;
+      flex: 0 0 auto;
+    }
+
+    .switch input {
+      display: none;
+    }
+
+    .slider {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: #cbd5e1;
+      transition: 0.18s ease;
+    }
+
+    .slider::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: white;
+      box-shadow: 0 2px 8px rgba(15,23,42,0.2);
+      transition: 0.18s ease;
+    }
+
+    .switch input:checked + .slider {
+      background: linear-gradient(135deg, var(--primary), var(--primary2));
+    }
+
+    .switch input:checked + .slider::after {
+      transform: translateX(20px);
     }
 
     .nas-form {
       display: none;
-      padding: 15px;
-      border: 1px solid #e2e8f0;
-      border-top: none;
-      border-radius: 0 0 6px 6px;
-      margin-top: -10px;
-      margin-bottom: 15px;
-      background: #fafafa;
+      padding: 0 16px 17px;
+      border-top: 1px solid var(--border);
     }
 
     .nas-form.active {
       display: block;
     }
 
+    .nas-form .grid {
+      padding-top: 16px;
+    }
+
     .inline-check {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      font-weight: normal;
+      gap: 8px;
+      height: 46px;
       color: #475569;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .inline-check input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--primary);
+    }
+
+    .actions {
+      position: sticky;
+      bottom: 0;
+      margin: 30px -34px -34px;
+      padding: 18px 34px;
+      border-top: 1px solid var(--border);
+      background: rgba(255,255,255,0.88);
+      backdrop-filter: blur(12px);
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    button {
+      width: 100%;
+      height: 50px;
+      border: 0;
+      border-radius: 16px;
+      color: white;
+      background: linear-gradient(135deg, var(--primary), var(--primary2));
+      font-size: 15px;
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 14px 32px rgba(37, 99, 235, 0.24);
+      transition: 0.18s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 18px 38px rgba(37, 99, 235, 0.3);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    button.secondary {
+      background: rgba(255,255,255,0.96);
+      color: var(--primary);
+      border: 1px solid rgba(37, 99, 235, 0.18);
+      box-shadow: none;
+    }
+
+    button.secondary:hover {
+      background: #eff6ff;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    button.small {
+      width: auto;
+      height: 40px;
+      padding: 0 16px;
+      border-radius: 12px;
+      font-size: 13px;
+    }
+
+    button.device-remove {
+      width: auto;
+      height: 40px;
+      padding: 0 14px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.94);
+      color: #dc2626;
+      border: 1px solid rgba(220, 38, 38, 0.18);
+      box-shadow: none;
+      font-size: 13px;
+    }
+
+    button.device-remove:hover {
+      background: #fef2f2;
+      box-shadow: 0 10px 24px rgba(220, 38, 38, 0.08);
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 18px;
+      font-size: 11px;
+      color: #94a3b8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    @media (max-width: 960px) {
+      body {
+        padding: 18px;
+      }
+
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        position: relative;
+        top: 0;
+        min-height: auto;
+      }
+
+      .hero h1 {
+        font-size: 30px;
+      }
+
+      .version {
+        position: static;
+        margin-top: 28px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 0;
+        background: #f8fafc;
+      }
+
+      .layout {
+        gap: 0;
+      }
+
+      .hero {
+        border-radius: 0 0 28px 28px;
+      }
+
+      .panel {
+        margin-top: -14px;
+        border-radius: 28px 28px 0 0;
+        box-shadow: none;
+        border-left: 0;
+        border-right: 0;
+      }
+
+      .panel-header,
+      form {
+        padding-left: 20px;
+        padding-right: 20px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .actions {
+        margin-left: -20px;
+        margin-right: -20px;
+        padding-left: 20px;
+        padding-right: 20px;
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
+
 <body>
-  <div class="container">
-    <a href="/logout" class="logout">退出 ⏻</a>
-
-    <div class="header">
-      <h2>设置面板</h2>
-    </div>
-
-    {{if .success}}
-    <div class="success-msg">✅ 配置已成功保存！</div>
-    {{end}}
-
-    <form id="configForm">
-      <div class="section-title">系统基础配置</div>
-
-      <div class="group">
-        <label>修改后台登录密码</label>
-        <input type="password" id="new_admin_password" placeholder="留空表示不修改；新密码至少 8 位">
-        <div class="hint">管理员密码不会再明文保存，只会保存 bcrypt hash。</div>
+  <main class="layout">
+    <aside class="hero">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+            <rect x="12" y="18" width="31" height="34" rx="8" fill="rgba(255,255,255,0.92)"/>
+            <rect x="18" y="25" width="18" height="5" rx="2.5" fill="#2563eb"/>
+            <rect x="18" y="35" width="18" height="5" rx="2.5" fill="#06b6d4"/>
+            <circle cx="22" cy="47" r="3" fill="#22c55e"/>
+            <path d="M45 18c6 0 11 5 11 11v6c0 2 1 4 3 6H31c2-2 3-4 3-6v-6c0-6 5-11 11-11Z" fill="#7dd3fc"/>
+            <path d="M40 45c1 3 3 5 5 5s4-2 5-5" stroke="white" stroke-width="4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">NasNotify Go</div>
+          <div class="brand-subtitle">NAS 聚合通知中心</div>
+        </div>
       </div>
 
-      <div class="group">
-        <label>轮询间隔 (分钟)</label>
-        <input type="number" id="interval_minutes" step="0.1" required>
+      <h1>统一管理后台</h1>
+      <p>
+        在这里修改企业微信参数、轮询间隔和 NAS 节点。敏感字段不会回显，留空表示保持现有值。
+      </p>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div>
+            <div class="step-title">查看基础配置</div>
+            <div class="step-desc">非敏感字段会正常显示，方便快速调整。</div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">2</div>
+          <div>
+            <div class="step-title">更新 NAS 节点</div>
+            <div class="step-desc">节点可以按需启用，不用的就保持关闭。</div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">3</div>
+          <div>
+            <div class="step-title">测试推送</div>
+            <div class="step-desc">保存后可以立即发送测试通知验证链路。</div>
+          </div>
+        </div>
       </div>
 
-      <div class="section-title">企业微信参数</div>
-      <div class="hint">敏感字段不会回显，留空表示沿用现有值；想修改就直接输入新内容。</div>
+      <div class="version">{{.version}}</div>
+    </aside>
 
-      <div class="group"><label>CorpID</label><input type="text" id="corpid"></div>
-      <div class="group"><label>AgentID</label><input type="text" id="agentid"></div>
-      <div class="group"><label>CorpSecret</label><input type="password" id="corpsecret" placeholder="留空表示保持现有值"></div>
-      <div class="group"><label>Token</label><input type="password" id="token" placeholder="留空表示保持现有值"></div>
-      <div class="group"><label>EncodingAESKey</label><input type="password" id="encoding_aes_key" placeholder="留空表示保持现有值"></div>
-      <div class="group"><label>NAS 跳转地址 (NasURL)</label><input type="text" id="nas_url"></div>
-      <div class="group"><label>自定义图片 API (PhotoURL)</label><input type="text" id="photo_url"></div>
-      <div class="group"><label>代理地址 (ProxyURL)</label><input type="text" id="proxy_url"></div>
-
-      <div class="section-title">主动抓取：NAS 节点配置</div>
-      <div class="hint">Cookie 和密码同样不会回显，留空保持原值。</div>
-
-      <label class="switch-row">
-        <input type="checkbox" id="enable_zspace" onchange="toggleForm('form_zspace', this.checked)">
-        启用极空间 (ZSpace)
-      </label>
-
-      <div id="form_zspace" class="nas-form">
-        <div class="group"><label>设备 IP:端口</label><input type="text" id="zs_ip"></div>
-        <div class="group"><label>Cookie</label><input type="password" id="zs_cookie" placeholder="留空表示保持现有值"></div>
-        <div class="group"><label>标识名称</label><input type="text" id="zs_name"></div>
-        <div class="group"><label>MAC 地址 (用于远程唤醒)</label><input type="text" id="zs_mac" placeholder="如: AA:BB:CC:DD:EE:FF"></div>
-        <label class="inline-check"><input type="checkbox" id="zs_ssl"> 使用 HTTPS</label>
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-header-main">
+          <div class="tag">后台控制</div>
+          <h2 class="panel-title">配置面板</h2>
+          <p class="panel-desc">敏感字段不会回显，留空表示沿用原值；直接输入新内容即可修改。</p>
+        </div>
+        <a href="/logout" class="logout">退出登录</a>
       </div>
 
-      <label class="switch-row">
-        <input type="checkbox" id="enable_ugreen" onchange="toggleForm('form_ugreen', this.checked)">
-        启用绿联 (UGreen)
-      </label>
+      <form id="configForm">
+        <div id="errorBox" class="error"></div>
+        {{if .success}}
+        <div class="success-msg">配置已成功保存。</div>
+        {{end}}
 
-      <div id="form_ugreen" class="nas-form">
-        <div class="group"><label>IP:端口</label><input type="text" id="ug_ip"></div>
-        <div class="group"><label>账号</label><input type="text" id="ug_user"></div>
-        <div class="group"><label>密码</label><input type="password" id="ug_pass" placeholder="留空表示保持现有值"></div>
-        <div class="group"><label>标识名称</label><input type="text" id="ug_name"></div>
-        <div class="group"><label>MAC 地址 (用于远程唤醒)</label><input type="text" id="ug_mac" placeholder="如: AA:BB:CC:DD:EE:FF"></div>
-        <label class="inline-check"><input type="checkbox" id="ug_ssl"> 使用 HTTPS</label>
-      </div>
+        <div class="section">
+          <div class="section-head">
+            <div class="section-title"><span class="dot"></span>系统基础配置</div>
+          </div>
 
-      <label class="switch-row">
-        <input type="checkbox" id="enable_fnos" onchange="toggleForm('form_fnos', this.checked)">
-        启用飞牛 (FnOS)
-      </label>
+          <div class="grid">
+            <div class="field">
+              <label for="new_admin_password">修改后台登录密码</label>
+              <input type="password" id="new_admin_password" placeholder="留空表示不修改；新密码至少 8 位">
+              <div class="hint">密码只在提交时更新，不会以明文保存。</div>
+            </div>
 
-      <div id="form_fnos" class="nas-form">
-        <div class="group"><label>IP:端口</label><input type="text" id="fn_ip"></div>
-        <div class="group"><label>账号</label><input type="text" id="fn_user"></div>
-        <div class="group"><label>密码</label><input type="password" id="fn_pass" placeholder="留空表示保持现有值"></div>
-        <div class="group"><label>标识名称</label><input type="text" id="fn_name"></div>
-        <div class="group"><label>MAC 地址 (用于远程唤醒)</label><input type="text" id="fn_mac" placeholder="如: AA:BB:CC:DD:EE:FF"></div>
-        <label class="inline-check"><input type="checkbox" id="fn_ssl"> 使用 HTTPS</label>
-      </div>
+            <div class="field">
+              <label for="interval_minutes">轮询间隔 (分钟)</label>
+              <input type="number" id="interval_minutes" step="0.1" required>
+            </div>
+          </div>
+        </div>
 
-      <button type="button" id="testPushBtn" onclick="sendTestPush()">发送测试通知</button>
-      <button type="button" onclick="saveConfig()">保存并应用</button>
-    </form>
+        <div class="section">
+          <div class="section-head">
+            <div class="section-title"><span class="dot"></span>企业微信参数</div>
+            <div class="hint">可后续修改</div>
+          </div>
+          <div class="hint" style="margin-bottom: 15px;">敏感字段不会回显，留空表示沿用现有值；想修改就直接输入新内容。</div>
 
-    <div style="text-align: center; font-size: 11px; color: #cbd5e1; margin-top: 25px; font-family: monospace;">
-      {{.version}}
-    </div>
-  </div>
+          <div class="grid">
+            <div class="field">
+              <label for="corpid">CorpID</label>
+              <input type="text" id="corpid">
+            </div>
+
+            <div class="field">
+              <label for="agentid">AgentID</label>
+              <input type="text" id="agentid">
+            </div>
+
+            <div class="field full">
+              <label for="corpsecret">CorpSecret</label>
+              <input type="password" id="corpsecret" placeholder="留空表示保持现有值">
+            </div>
+
+            <div class="field">
+              <label for="token">Token</label>
+              <input type="password" id="token" placeholder="留空表示保持现有值">
+            </div>
+
+            <div class="field">
+              <label for="encoding_aes_key">EncodingAESKey</label>
+              <input type="password" id="encoding_aes_key" placeholder="留空表示保持现有值">
+            </div>
+
+            <div class="field full">
+              <label for="nas_url">NAS 跳转地址 (NasURL)</label>
+              <input type="text" id="nas_url">
+            </div>
+
+            <div class="field">
+              <label for="photo_url">自定义图片 API (PhotoURL)</label>
+              <input type="text" id="photo_url">
+            </div>
+
+            <div class="field">
+              <label for="proxy_url">代理地址 (ProxyURL)</label>
+              <input type="text" id="proxy_url">
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <div class="section-title"><span class="dot"></span>NAS 节点</div>
+            <div class="hint">按需启用</div>
+          </div>
+          <div class="hint" style="margin-bottom: 15px;">Cookie 和密码不会回显，留空保持原值。</div>
+
+          <div class="nas-tools" style="margin-bottom: 15px;">
+            <div class="hint">支持无限添加，不同品牌可分别配置参数，保存后会保留已存敏感值。</div>
+            <button type="button" class="secondary small" id="addDeviceBtn">新增设备</button>
+          </div>
+
+          <div class="nas-list" id="deviceList"></div>
+
+          <template id="nasDeviceTemplate">
+            <div class="nas-card nas-device-card" data-device-card>
+              <div class="device-head">
+                <div class="nas-info">
+                  <div class="nas-badge" data-brand-badge>Z</div>
+                  <div>
+                    <div class="nas-name device-title" data-device-title>极空间 ZSpace</div>
+                    <div class="nas-desc device-desc" data-device-desc>通过 Cookie 读取通知</div>
+                  </div>
+                </div>
+                <button type="button" class="device-remove" data-action="remove">删除</button>
+              </div>
+
+              <div class="device-body">
+                <input type="hidden" data-field="id">
+                <div class="grid">
+                  <div class="field full">
+                    <label>设备品牌</label>
+                    <select data-field="brand">
+                      <option value="zspace">极空间 ZSpace</option>
+                      <option value="ugreen">绿联 UGreen</option>
+                      <option value="fnos">飞牛 FnOS</option>
+                    </select>
+                  </div>
+
+                  <div class="field">
+                    <label>标识名称</label>
+                    <input type="text" data-field="name" placeholder="例如：家里 NAS">
+                  </div>
+
+                  <div class="field">
+                    <label data-address-label>设备地址</label>
+                    <input type="text" data-field="address" placeholder="192.168.1.10:5055">
+                  </div>
+
+                  <div class="field full device-brand-field" data-brand-block data-brands="zspace" hidden>
+                    <label>Cookie</label>
+                    <input type="password" data-field="zspace_cookie" placeholder="登录后的 Cookie">
+                  </div>
+
+                  <div class="field device-brand-field" data-brand-block data-brands="zspace,ugreen,fnos">
+                    <label>MAC 地址</label>
+                    <input type="text" data-field="mac" placeholder="AA:BB:CC:DD:EE:FF">
+                  </div>
+
+                  <div class="field device-brand-field" data-brand-block data-brands="ugreen,fnos" hidden>
+                    <label>账号</label>
+                    <input type="text" data-field="ugreen_username" placeholder="登录账号">
+                  </div>
+
+                  <div class="field device-brand-field" data-brand-block data-brands="ugreen,fnos" hidden>
+                    <label>密码</label>
+                    <input type="password" data-field="ugreen_password" placeholder="登录密码">
+                  </div>
+
+                  <div class="field device-brand-field" data-brand-block data-brands="fnos" hidden>
+                    <label>账号</label>
+                    <input type="text" data-field="fnos_username" placeholder="登录账号">
+                  </div>
+
+                  <div class="field device-brand-field" data-brand-block data-brands="fnos" hidden>
+                    <label>密码</label>
+                    <input type="password" data-field="fnos_password" placeholder="登录密码">
+                  </div>
+
+                  <div class="field full device-brand-field" data-brand-block data-brands="fnos" hidden>
+                    <label>Cookie（可选）</label>
+                    <input type="password" data-field="fnos_cookie" placeholder="可选 Cookie">
+                  </div>
+
+                  <div class="field">
+                    <label>&nbsp;</label>
+                    <label class="inline-check">
+                      <input type="checkbox" data-field="use_ssl">
+                      使用 HTTPS
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <div class="nas-list" style="display:none">
+            <div class="nas-card">
+              <label class="nas-toggle" for="enable_zspace">
+                <div class="nas-info">
+                  <div class="nas-badge">Z</div>
+                  <div>
+                    <div class="nas-name">极空间 ZSpace</div>
+                    <div class="nas-desc">通过 Cookie 抓取通知</div>
+                  </div>
+                </div>
+                <span class="switch">
+                  <input type="checkbox" id="enable_zspace" onchange="toggleForm('form_zspace', this.checked)">
+                  <span class="slider"></span>
+                </span>
+              </label>
+
+              <div id="form_zspace" class="nas-form">
+                <div class="grid">
+                  <div class="field">
+                    <label for="zs_ip">设备 IP:端口</label>
+                    <input type="text" id="zs_ip">
+                  </div>
+
+                  <div class="field">
+                    <label for="zs_name">标识名称</label>
+                    <input type="text" id="zs_name">
+                  </div>
+
+                  <div class="field full">
+                    <label for="zs_cookie">Cookie</label>
+                    <input type="password" id="zs_cookie" placeholder="留空表示保持现有值">
+                  </div>
+
+                  <div class="field">
+                    <label for="zs_mac">MAC 地址 (用于远程唤醒)</label>
+                    <input type="text" id="zs_mac" placeholder="例如 AA:BB:CC:DD:EE:FF">
+                  </div>
+
+                  <div class="field">
+                    <label>&nbsp;</label>
+                    <label class="inline-check">
+                      <input type="checkbox" id="zs_ssl">
+                      使用 HTTPS
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="nas-card">
+              <label class="nas-toggle" for="enable_ugreen">
+                <div class="nas-info">
+                  <div class="nas-badge">U</div>
+                  <div>
+                    <div class="nas-name">绿联 UGreen</div>
+                    <div class="nas-desc">通过账号密码登录并抓取通知</div>
+                  </div>
+                </div>
+                <span class="switch">
+                  <input type="checkbox" id="enable_ugreen" onchange="toggleForm('form_ugreen', this.checked)">
+                  <span class="slider"></span>
+                </span>
+              </label>
+
+              <div id="form_ugreen" class="nas-form">
+                <div class="grid">
+                  <div class="field">
+                    <label for="ug_ip">IP:端口</label>
+                    <input type="text" id="ug_ip">
+                  </div>
+
+                  <div class="field">
+                    <label for="ug_name">标识名称</label>
+                    <input type="text" id="ug_name">
+                  </div>
+
+                  <div class="field">
+                    <label for="ug_user">账号</label>
+                    <input type="text" id="ug_user">
+                  </div>
+
+                  <div class="field">
+                    <label for="ug_pass">密码</label>
+                    <input type="password" id="ug_pass" placeholder="留空表示保持现有值">
+                  </div>
+
+                  <div class="field">
+                    <label for="ug_mac">MAC 地址 (用于远程唤醒)</label>
+                    <input type="text" id="ug_mac" placeholder="例如 AA:BB:CC:DD:EE:FF">
+                  </div>
+
+                  <div class="field">
+                    <label>&nbsp;</label>
+                    <label class="inline-check">
+                      <input type="checkbox" id="ug_ssl">
+                      使用 HTTPS
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="nas-card">
+              <label class="nas-toggle" for="enable_fnos">
+                <div class="nas-info">
+                  <div class="nas-badge">F</div>
+                  <div>
+                    <div class="nas-name">飞牛 FnOS</div>
+                    <div class="nas-desc">通过账号密码登录并抓取通知</div>
+                  </div>
+                </div>
+                <span class="switch">
+                  <input type="checkbox" id="enable_fnos" onchange="toggleForm('form_fnos', this.checked)">
+                  <span class="slider"></span>
+                </span>
+              </label>
+
+              <div id="form_fnos" class="nas-form">
+                <div class="grid">
+                  <div class="field">
+                    <label for="fn_ip">IP:端口</label>
+                    <input type="text" id="fn_ip">
+                  </div>
+
+                  <div class="field">
+                    <label for="fn_name">标识名称</label>
+                    <input type="text" id="fn_name">
+                  </div>
+
+                  <div class="field">
+                    <label for="fn_user">账号</label>
+                    <input type="text" id="fn_user">
+                  </div>
+
+                  <div class="field">
+                    <label for="fn_pass">密码</label>
+                    <input type="password" id="fn_pass" placeholder="留空表示保持现有值">
+                  </div>
+
+                  <div class="field">
+                    <label for="fn_mac">MAC 地址 (用于远程唤醒)</label>
+                    <input type="text" id="fn_mac" placeholder="例如 AA:BB:CC:DD:EE:FF">
+                  </div>
+
+                  <div class="field">
+                    <label>&nbsp;</label>
+                    <label class="inline-check">
+                      <input type="checkbox" id="fn_ssl">
+                      使用 HTTPS
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="testPushBtn" class="secondary" onclick="sendTestPush()">发送测试通知</button>
+          <button type="button" id="saveBtn" onclick="saveConfig()">保存并应用</button>
+        </div>
+
+        <div class="footer">{{.version}}</div>
+      </form>
+    </section>
+  </main>
 
   <script>
     const rawConfig = {{.configJson}};
 
     function toggleForm(id, show) {
       document.getElementById(id).classList.toggle('active', show);
+    }
+
+    function showError(message) {
+      const box = document.getElementById('errorBox');
+      box.textContent = message;
+      box.classList.add('show');
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function clearError() {
+      const box = document.getElementById('errorBox');
+      box.textContent = '';
+      box.classList.remove('show');
     }
 
     window.onload = function() {
@@ -307,48 +1121,51 @@
       return {
         interval_minutes: parseFloat(document.getElementById('interval_minutes').value) || 5,
 
-        corpid: document.getElementById('corpid').value,
-        agentid: document.getElementById('agentid').value,
+        corpid: document.getElementById('corpid').value.trim(),
+        agentid: document.getElementById('agentid').value.trim(),
         corpsecret: document.getElementById('corpsecret').value,
         token: document.getElementById('token').value,
         encoding_aes_key: document.getElementById('encoding_aes_key').value,
-        nas_url: document.getElementById('nas_url').value,
-        photo_url: document.getElementById('photo_url').value,
-        proxy_url: document.getElementById('proxy_url').value,
+        nas_url: document.getElementById('nas_url').value.trim(),
+        photo_url: document.getElementById('photo_url').value.trim(),
+        proxy_url: document.getElementById('proxy_url').value.trim(),
 
         zspace: document.getElementById('enable_zspace').checked ? [{
-          ip_port: document.getElementById('zs_ip').value,
+          ip_port: document.getElementById('zs_ip').value.trim(),
           cookie: document.getElementById('zs_cookie').value,
-          notify_type_name: document.getElementById('zs_name').value,
-          mac_address: document.getElementById('zs_mac').value,
+          notify_type_name: document.getElementById('zs_name').value.trim(),
+          mac_address: document.getElementById('zs_mac').value.trim(),
           use_ssl: document.getElementById('zs_ssl').checked
         }] : [],
 
         ugreen: document.getElementById('enable_ugreen').checked ? [{
-          ip_port: document.getElementById('ug_ip').value,
-          username: document.getElementById('ug_user').value,
+          ip_port: document.getElementById('ug_ip').value.trim(),
+          username: document.getElementById('ug_user').value.trim(),
           password: document.getElementById('ug_pass').value,
-          notify_type_name: document.getElementById('ug_name').value,
-          mac_address: document.getElementById('ug_mac').value,
+          notify_type_name: document.getElementById('ug_name').value.trim(),
+          mac_address: document.getElementById('ug_mac').value.trim(),
           use_ssl: document.getElementById('ug_ssl').checked
         }] : [],
 
         fnos: document.getElementById('enable_fnos').checked ? [{
-          server: document.getElementById('fn_ip').value,
-          username: document.getElementById('fn_user').value,
+          server: document.getElementById('fn_ip').value.trim(),
+          username: document.getElementById('fn_user').value.trim(),
           password: document.getElementById('fn_pass').value,
-          notify_type_name: document.getElementById('fn_name').value,
-          mac_address: document.getElementById('fn_mac').value,
+          notify_type_name: document.getElementById('fn_name').value.trim(),
+          mac_address: document.getElementById('fn_mac').value.trim(),
           use_ssl: document.getElementById('fn_ssl').checked
         }] : []
       };
     }
 
     async function saveConfig() {
+      clearError();
+
+      const submitBtn = document.getElementById('saveBtn');
       const newPassword = document.getElementById('new_admin_password').value;
 
       if (newPassword && newPassword.length < 8) {
-        alert('新管理员密码至少 8 位');
+        showError('新管理员密码至少 8 位。');
         return;
       }
 
@@ -357,35 +1174,349 @@
         config: buildConfig()
       };
 
-      const res = await fetch('/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      submitBtn.disabled = true;
+      submitBtn.textContent = '正在保存...';
 
-      if (!res.ok) {
-        let msg = '保存失败';
-        try {
-          const data = await res.json();
-          msg = data.error || msg;
-        } catch (_) {}
-        alert(msg);
-        return;
+      try {
+        const res = await fetch('/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          let msg = '保存失败';
+          try {
+            const data = await res.json();
+            msg = data.error || msg;
+          } catch (_) {}
+          showError(msg);
+          return;
+        }
+
+        window.location.href = '/?success=true';
+      } catch (err) {
+        showError('请求失败，请检查服务是否正常运行。');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '保存并应用';
       }
-
-      window.location.href = '/?success=true';
     }
 
     async function sendTestPush() {
-      const res = await fetch('/test-push');
-      const data = await res.json();
+      const btn = document.getElementById('testPushBtn');
+      const oldText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '发送中...';
 
-      if (data.success) {
-        alert('已触发测试推送，请查看企业微信');
-      } else {
-        alert(data.msg || '测试推送失败');
+      try {
+        const res = await fetch('/test-push');
+        const data = await res.json();
+
+        if (data.success) {
+          alert('已发送测试通知，请查看企业微信。');
+        } else {
+          alert(data.msg || '测试推送失败');
+        }
+      } catch (err) {
+        alert('请求失败，请检查服务是否正常运行。');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
       }
     }
+
+    const NAS_BRANDS = {
+      zspace: {
+        label: '极空间 ZSpace',
+        short: 'Z',
+        desc: '通过 Cookie 读取通知',
+        addressLabel: '设备 IP:端口',
+        addressPlaceholder: '192.168.1.10:5055'
+      },
+      ugreen: {
+        label: '绿联 UGreen',
+        short: 'U',
+        desc: '通过账号密码登录并抓取通知',
+        addressLabel: '设备 IP:端口',
+        addressPlaceholder: '192.168.1.20:9443'
+      },
+      fnos: {
+        label: '飞牛 FnOS',
+        short: 'F',
+        desc: '通过账号密码登录并抓取通知',
+        addressLabel: '服务器地址',
+        addressPlaceholder: '192.168.1.30:5666'
+      }
+    };
+
+    function getNasBrandMeta(brand) {
+      return NAS_BRANDS[brand] || NAS_BRANDS.zspace;
+    }
+
+    function getNasField(card, field) {
+      return card.querySelector(`[data-field="${field}"]`);
+    }
+
+    function syncNasCardSummary(card) {
+      const brand = getNasField(card, 'brand').value || 'zspace';
+      const meta = getNasBrandMeta(brand);
+      const name = getNasField(card, 'name').value.trim();
+
+      card.dataset.brand = brand;
+      card.querySelector('[data-brand-badge]').textContent = meta.short;
+      card.querySelector('[data-device-title]').textContent = name || meta.label;
+      card.querySelector('[data-device-desc]').textContent = meta.desc;
+      card.querySelector('[data-address-label]').textContent = meta.addressLabel;
+      getNasField(card, 'address').placeholder = meta.addressPlaceholder;
+
+      card.querySelectorAll('[data-brand-block]').forEach((block) => {
+        const brands = (block.dataset.brands || '').split(',').map((item) => item.trim()).filter(Boolean);
+        block.hidden = brands.length > 0 && !brands.includes(brand);
+      });
+    }
+
+    function createNasCard(device = {}) {
+      const template = document.getElementById('nasDeviceTemplate');
+      const card = template.content.firstElementChild.cloneNode(true);
+      const brand = device.brand || 'zspace';
+
+      card.dataset.originalBrand = brand;
+      getNasField(card, 'id').value = device.id || '';
+      getNasField(card, 'brand').value = brand;
+      getNasField(card, 'name').value = device.notify_type_name || '';
+      getNasField(card, 'address').value = device.ip_port || device.server || '';
+      getNasField(card, 'zspace_cookie').value = device.cookie || '';
+      getNasField(card, 'ugreen_username').value = device.username || '';
+      getNasField(card, 'ugreen_password').value = device.password || '';
+      getNasField(card, 'fnos_cookie').value = device.cookie || '';
+      getNasField(card, 'mac').value = device.mac_address || '';
+      getNasField(card, 'use_ssl').checked = !!device.use_ssl;
+
+      getNasField(card, 'brand').addEventListener('change', () => syncNasCardSummary(card));
+      getNasField(card, 'name').addEventListener('input', () => syncNasCardSummary(card));
+      card.querySelector('[data-action="remove"]').addEventListener('click', () => card.remove());
+
+      syncNasCardSummary(card);
+      return card;
+    }
+
+    function initNasEditor() {
+      const list = document.getElementById('deviceList');
+      if (!list) {
+        return;
+      }
+
+      const seeds = [];
+      (Array.isArray(rawConfig.zspace) ? rawConfig.zspace : []).forEach((item) => {
+        seeds.push({ brand: 'zspace', ...item });
+      });
+      (Array.isArray(rawConfig.ugreen) ? rawConfig.ugreen : []).forEach((item) => {
+        seeds.push({ brand: 'ugreen', ...item });
+      });
+      (Array.isArray(rawConfig.fnos) ? rawConfig.fnos : []).forEach((item) => {
+        seeds.push({ brand: 'fnos', ...item });
+      });
+
+      if (seeds.length === 0) {
+        seeds.push({ brand: 'zspace' });
+      }
+
+      list.innerHTML = '';
+      seeds.forEach((device) => {
+        list.appendChild(createNasCard(device));
+      });
+
+      const addBtn = document.getElementById('addDeviceBtn');
+      if (addBtn) {
+        addBtn.addEventListener('click', () => {
+          const card = createNasCard({ brand: 'zspace' });
+          list.appendChild(card);
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          getNasField(card, 'name').focus();
+        });
+      }
+    }
+
+    function buildNasDeviceConfig(card) {
+      const brand = getNasField(card, 'brand').value || 'zspace';
+      const meta = getNasBrandMeta(brand);
+      const id = getNasField(card, 'id').value.trim();
+      const name = getNasField(card, 'name').value.trim();
+      const address = getNasField(card, 'address').value.trim();
+      const mac = getNasField(card, 'mac').value.trim();
+      const zspaceCookie = getNasField(card, 'zspace_cookie').value;
+      const ugreenUsername = getNasField(card, 'ugreen_username').value.trim();
+      const ugreenPassword = getNasField(card, 'ugreen_password').value;
+      const fnosUsername = getNasField(card, 'fnos_username').value.trim();
+      const fnosPassword = getNasField(card, 'fnos_password').value;
+      const fnosCookie = getNasField(card, 'fnos_cookie').value;
+      const needsSecrets = !id || card.dataset.originalBrand !== brand;
+
+      const hasContent = [id, name, address, mac, zspaceCookie, ugreenUsername, ugreenPassword, fnosUsername, fnosPassword, fnosCookie].some((value) => String(value || '').trim() !== '');
+      if (!hasContent) {
+        return null;
+      }
+
+      if (!name) {
+        return { error: '请填写设备名称。' };
+      }
+      if (!address) {
+        return { error: `请填写 ${name || meta.label} 的设备地址。` };
+      }
+
+      if (brand === 'zspace') {
+        if (needsSecrets && !zspaceCookie.trim()) {
+          return { error: `${name || meta.label} 需要填写 Cookie。` };
+        }
+        return {
+          brand: 'zspace',
+          config: {
+            id: id,
+            ip_port: address,
+            cookie: zspaceCookie,
+            notify_type_name: name,
+            mac_address: mac,
+            use_ssl: getNasField(card, 'use_ssl').checked
+          }
+        };
+      }
+
+      if (brand === 'ugreen') {
+        if (needsSecrets && (!ugreenUsername || !ugreenPassword)) {
+          return { error: `${name || meta.label} 需要填写账号和密码。` };
+        }
+        return {
+          brand: 'ugreen',
+          config: {
+            id: id,
+            ip_port: address,
+            username: ugreenUsername,
+            password: ugreenPassword,
+            notify_type_name: name,
+            mac_address: mac,
+            use_ssl: getNasField(card, 'use_ssl').checked
+          }
+        };
+      }
+
+      if (brand === 'fnos') {
+        if (needsSecrets && (!fnosUsername || !fnosPassword)) {
+          return { error: `${name || meta.label} 需要填写账号和密码。` };
+        }
+        return {
+          brand: 'fnos',
+          config: {
+            id: id,
+            server: address,
+            username: fnosUsername,
+            password: fnosPassword,
+            cookie: fnosCookie,
+            notify_type_name: name,
+            mac_address: mac,
+            use_ssl: getNasField(card, 'use_ssl').checked
+          }
+        };
+      }
+
+      return { error: '请选择设备品牌。' };
+    }
+
+    function collectNasDevices() {
+      const devices = {
+        zspace: [],
+        ugreen: [],
+        fnos: []
+      };
+
+      for (const card of document.querySelectorAll('[data-device-card]')) {
+        const result = buildNasDeviceConfig(card);
+        if (!result) {
+          continue;
+        }
+        if (result.error) {
+          return result;
+        }
+        devices[result.brand].push(result.config);
+      }
+
+      return devices;
+    }
+
+    function buildConfig() {
+      const devices = collectNasDevices();
+      if (devices.error) {
+        showError(devices.error);
+        return null;
+      }
+
+      return {
+        interval_minutes: parseFloat(document.getElementById('interval_minutes').value) || 5,
+        corpid: document.getElementById('corpid').value.trim(),
+        agentid: document.getElementById('agentid').value.trim(),
+        corpsecret: document.getElementById('corpsecret').value,
+        token: document.getElementById('token').value,
+        encoding_aes_key: document.getElementById('encoding_aes_key').value,
+        nas_url: document.getElementById('nas_url').value.trim(),
+        photo_url: document.getElementById('photo_url').value.trim(),
+        proxy_url: document.getElementById('proxy_url').value.trim(),
+        zspace: devices.zspace,
+        ugreen: devices.ugreen,
+        fnos: devices.fnos
+      };
+    }
+
+    async function saveConfig() {
+      clearError();
+
+      const submitBtn = document.getElementById('saveBtn');
+      const newPassword = document.getElementById('new_admin_password').value;
+
+      if (newPassword && newPassword.length < 8) {
+        showError('新管理员密码至少 8 位。');
+        return;
+      }
+
+      const config = buildConfig();
+      if (!config) {
+        return;
+      }
+
+      const payload = {
+        new_admin_password: newPassword,
+        config: config
+      };
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = '正在保存...';
+
+      try {
+        const res = await fetch('/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          let msg = '保存失败';
+          try {
+            const data = await res.json();
+            msg = data.error || msg;
+          } catch (_) {}
+          showError(msg);
+          return;
+        }
+
+        window.location.href = '/?success=true';
+      } catch (err) {
+        showError('请求失败，请检查服务是否正常运行。');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '保存并应用';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', initNasEditor);
   </script>
 </body>
 </html>

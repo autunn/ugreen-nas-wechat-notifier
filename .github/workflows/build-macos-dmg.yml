@@ -62,7 +62,6 @@ jobs:
 
           cp "macos/NasNotifyGo/.build/release/NasNotifyGo" "${MACOS}/NasNotify-Go"
           cp "dist/backend/nasnotify-go-app" "${RESOURCES}/nasnotify-go-app"
-          cp -R templates "${RESOURCES}/templates"
           cp "${ICON_ICNS}" "${RESOURCES}/AppIcon.icns"
           cp "${ICON_PNG}" "${RESOURCES}/AppIcon.png"
 
@@ -79,9 +78,6 @@ jobs:
           LOG_FILE="$LOG_DIR/NasNotify-Go.log"
 
           mkdir -p "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
-
-          rm -rf "$APP_SUPPORT/templates"
-          cp -R "$APP_RESOURCES/templates" "$APP_SUPPORT/templates"
 
           cd "$APP_SUPPORT"
           exec "$APP_RESOURCES/nasnotify-go-app" >> "$LOG_FILE" 2>&1
