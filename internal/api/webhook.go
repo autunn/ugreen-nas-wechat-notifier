@@ -64,7 +64,7 @@ func HandleVerify(c *gin.Context) {
 	}
 
 	cipherText, err := base64.StdEncoding.DecodeString(echostr)
-	if err != nil || len(cipherText) < 16 {
+	if err != nil || len(cipherText) < 32 || len(cipherText)%aes.BlockSize != 0 {
 		c.AbortWithStatus(403)
 		return
 	}
@@ -79,6 +79,10 @@ func HandleVerify(c *gin.Context) {
 	mode.CryptBlocks(cipherText, cipherText)
 
 	msgLen := binary.BigEndian.Uint32(cipherText[16:20])
+	if int(msgLen)+20 > len(cipherText) {
+		c.AbortWithStatus(403)
+		return
+	}
 	c.String(200, string(cipherText[20:20+msgLen]))
 }
 
@@ -89,6 +93,10 @@ func HandleMessage(c *gin.Context) {
 	var xmlMsg notify.WeChatXMLMsg
 	if len(bodyBytes) > 0 {
 		if err := xml.Unmarshal(bodyBytes, &xmlMsg); err == nil && xmlMsg.Encrypt != "" {
+			if !verifyWeChatSignature(c, xmlMsg.Encrypt) {
+				c.AbortWithStatus(403)
+				return
+			}
 			processWechatEvent(c, xmlMsg.Encrypt)
 			return
 		}
@@ -142,7 +150,7 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 	}
 
 	cipherText, err := base64.StdEncoding.DecodeString(encryptStr)
-	if err != nil || len(cipherText) < 16 {
+	if err != nil || len(cipherText) < 32 || len(cipherText)%aes.BlockSize != 0 {
 		c.String(200, "success")
 		return
 	}
@@ -157,6 +165,10 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 	mode.CryptBlocks(cipherText, cipherText)
 
 	msgLen := binary.BigEndian.Uint32(cipherText[16:20])
+	if int(msgLen)+20 > len(cipherText) {
+		c.String(200, "success")
+		return
+	}
 	plainXmlBytes := cipherText[20 : 20+msgLen]
 
 	var plainMsg notify.WeChatPlainMsg
@@ -211,6 +223,26 @@ func processWechatEvent(c *gin.Context, encryptStr string) {
 	}
 
 	c.String(200, "success")
+}
+
+func verifyWeChatSignature(c *gin.Context, encrypt string) bool {
+	config.CfgMu.RLock()
+	token := config.Config.Token
+	config.CfgMu.RUnlock()
+
+	msgSig := c.Query("msg_signature")
+	timestamp := c.Query("timestamp")
+	nonce := c.Query("nonce")
+	if token == "" || msgSig == "" || timestamp == "" || nonce == "" {
+		return false
+	}
+
+	params := []string{token, timestamp, nonce, encrypt}
+	sort.Strings(params)
+
+	h := sha1.New()
+	h.Write([]byte(strings.Join(params, "")))
+	return fmt.Sprintf("%x", h.Sum(nil)) == msgSig
 }
 
 // handleWakeMenuCommand 处理企业微信菜单「远程唤醒」点击事件

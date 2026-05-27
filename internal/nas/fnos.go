@@ -97,12 +97,17 @@ func ProcessFnOs() {
 		var newNotices []map[string]interface{}
 
 		for _, item := range notifyListInterface {
-			notice := item.(map[string]interface{})
-			if dtStr, ok := notice["datetime"].(string); ok {
-				t, _ := time.Parse(fnosTimeFormat, dtStr)
-				if t.After(lastTime) {
-					newNotices = append(newNotices, notice)
-				}
+			notice, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			dtStr, ok := notice["datetime"].(string)
+			if !ok {
+				continue
+			}
+			t, err := time.Parse(fnosTimeFormat, dtStr)
+			if err == nil && t.After(lastTime) {
+				newNotices = append(newNotices, notice)
 			}
 		}
 
@@ -110,13 +115,18 @@ func ProcessFnOs() {
 		if len(newNotices) > 0 {
 			// 按时间升序排序，保证写入日志顺序正确
 			sort.Slice(newNotices, func(i, j int) bool {
-				t1, _ := time.Parse(fnosTimeFormat, newNotices[i]["datetime"].(string))
-				t2, _ := time.Parse(fnosTimeFormat, newNotices[j]["datetime"].(string))
+				t1, _ := time.Parse(fnosTimeFormat, getNoticeString(newNotices[i], "datetime"))
+				t2, _ := time.Parse(fnosTimeFormat, getNoticeString(newNotices[j], "datetime"))
 				return t1.Before(t2)
 			})
 
 			fileInfo, err := os.Stat(logFile)
-			isFirstRun := os.IsNotExist(err) || fileInfo.Size() == 0
+			isFirstRun := false
+			if err != nil {
+				isFirstRun = os.IsNotExist(err)
+			} else {
+				isFirstRun = fileInfo.Size() == 0
+			}
 
 			if isFirstRun && len(newNotices) > 10 {
 				newNotices = newNotices[len(newNotices)-10:] // 首次最多推 10 条
@@ -268,8 +278,16 @@ func (c *FnOsClient) GetRSAPub() error {
 	if err != nil {
 		return err
 	}
-	c.pub = resp["pub"].(string)
-	c.si = resp["si"].(string)
+	pub, ok := resp["pub"].(string)
+	if !ok || pub == "" {
+		return fmt.Errorf("missing RSA public key")
+	}
+	si, ok := resp["si"].(string)
+	if !ok || si == "" {
+		return fmt.Errorf("missing security identifier")
+	}
+	c.pub = pub
+	c.si = si
 	return nil
 }
 
@@ -292,9 +310,17 @@ func (c *FnOsClient) Login(username, password string) error {
 
 	if bid, ok := resp["backId"].(string); ok {
 		c.backId = bid
+	} else {
+		return fmt.Errorf("missing backId")
 	}
 	if sec, ok := resp["secret"].(string); ok {
-		c.signKey, _ = crypto.AesDecrypt(sec, c.aesKey, c.iv)
+		signKey, err := crypto.AesDecrypt(sec, c.aesKey, c.iv)
+		if err != nil {
+			return err
+		}
+		c.signKey = signKey
+	} else {
+		return fmt.Errorf("missing secret")
 	}
 	return nil
 }
@@ -338,8 +364,11 @@ func saveFnOsNotices(notices []map[string]interface{}, file string) {
 	defer f.Close()
 
 	for _, notice := range notices {
-		dtStr := notice["datetime"].(string)
-		content := notice["content"].(string)
+		dtStr := getNoticeString(notice, "datetime")
+		content := getNoticeString(notice, "content")
+		if dtStr == "" || content == "" {
+			continue
+		}
 
 		t, _ := time.Parse(fnosTimeFormat, dtStr)
 		// 飞牛接口返回的是 UTC 时间，转成本地（北京）时间记录
@@ -355,7 +384,26 @@ func buildFnOsPushContent(notices []map[string]interface{}, typeName string) str
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("%s消息通知（共%d条）", typeName, len(notices)))
 	for i, notice := range notices {
-		builder.WriteString(fmt.Sprintf("\n\n%d. %s", i+1, notice["content"].(string)))
+		content := getNoticeString(notice, "content")
+		if content == "" {
+			continue
+		}
+		builder.WriteString(fmt.Sprintf("\n\n%d. %s", i+1, content))
 	}
 	return builder.String()
+}
+
+func getNoticeString(notice map[string]interface{}, key string) string {
+	if notice == nil {
+		return ""
+	}
+	val, ok := notice[key]
+	if !ok {
+		return ""
+	}
+	s, ok := val.(string)
+	if !ok {
+		return ""
+	}
+	return s
 }

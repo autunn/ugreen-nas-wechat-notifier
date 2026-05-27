@@ -184,17 +184,19 @@
       </div>
 
       <div class="section-title">企业微信参数</div>
+      <div class="hint">敏感字段不会回显，留空表示沿用现有值；想修改就直接输入新内容。</div>
 
       <div class="group"><label>CorpID</label><input type="text" id="corpid"></div>
       <div class="group"><label>AgentID</label><input type="text" id="agentid"></div>
-      <div class="group"><label>CorpSecret</label><input type="password" id="corpsecret"></div>
-      <div class="group"><label>Token</label><input type="text" id="token"></div>
-      <div class="group"><label>EncodingAESKey</label><input type="text" id="encoding_aes_key"></div>
+      <div class="group"><label>CorpSecret</label><input type="password" id="corpsecret" placeholder="留空表示保持现有值"></div>
+      <div class="group"><label>Token</label><input type="password" id="token" placeholder="留空表示保持现有值"></div>
+      <div class="group"><label>EncodingAESKey</label><input type="password" id="encoding_aes_key" placeholder="留空表示保持现有值"></div>
       <div class="group"><label>NAS 跳转地址 (NasURL)</label><input type="text" id="nas_url"></div>
       <div class="group"><label>自定义图片 API (PhotoURL)</label><input type="text" id="photo_url"></div>
       <div class="group"><label>代理地址 (ProxyURL)</label><input type="text" id="proxy_url"></div>
 
       <div class="section-title">主动抓取：NAS 节点配置</div>
+      <div class="hint">Cookie 和密码同样不会回显，留空保持原值。</div>
 
       <label class="switch-row">
         <input type="checkbox" id="enable_zspace" onchange="toggleForm('form_zspace', this.checked)">
@@ -203,7 +205,7 @@
 
       <div id="form_zspace" class="nas-form">
         <div class="group"><label>设备 IP:端口</label><input type="text" id="zs_ip"></div>
-        <div class="group"><label>Cookie</label><input type="text" id="zs_cookie"></div>
+        <div class="group"><label>Cookie</label><input type="password" id="zs_cookie" placeholder="留空表示保持现有值"></div>
         <div class="group"><label>标识名称</label><input type="text" id="zs_name"></div>
         <div class="group"><label>MAC 地址 (用于远程唤醒)</label><input type="text" id="zs_mac" placeholder="如: AA:BB:CC:DD:EE:FF"></div>
         <label class="inline-check"><input type="checkbox" id="zs_ssl"> 使用 HTTPS</label>
@@ -217,7 +219,7 @@
       <div id="form_ugreen" class="nas-form">
         <div class="group"><label>IP:端口</label><input type="text" id="ug_ip"></div>
         <div class="group"><label>账号</label><input type="text" id="ug_user"></div>
-        <div class="group"><label>密码</label><input type="password" id="ug_pass"></div>
+        <div class="group"><label>密码</label><input type="password" id="ug_pass" placeholder="留空表示保持现有值"></div>
         <div class="group"><label>标识名称</label><input type="text" id="ug_name"></div>
         <div class="group"><label>MAC 地址 (用于远程唤醒)</label><input type="text" id="ug_mac" placeholder="如: AA:BB:CC:DD:EE:FF"></div>
         <label class="inline-check"><input type="checkbox" id="ug_ssl"> 使用 HTTPS</label>
@@ -231,7 +233,7 @@
       <div id="form_fnos" class="nas-form">
         <div class="group"><label>IP:端口</label><input type="text" id="fn_ip"></div>
         <div class="group"><label>账号</label><input type="text" id="fn_user"></div>
-        <div class="group"><label>密码</label><input type="password" id="fn_pass"></div>
+        <div class="group"><label>密码</label><input type="password" id="fn_pass" placeholder="留空表示保持现有值"></div>
         <div class="group"><label>标识名称</label><input type="text" id="fn_name"></div>
         <div class="group"><label>MAC 地址 (用于远程唤醒)</label><input type="text" id="fn_mac" placeholder="如: AA:BB:CC:DD:EE:FF"></div>
         <label class="inline-check"><input type="checkbox" id="fn_ssl"> 使用 HTTPS</label>

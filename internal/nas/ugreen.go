@@ -141,7 +141,12 @@ func ProcessUGreen() {
 		}
 
 		fileInfo, err := os.Stat(logFile)
-		isFirstRun := os.IsNotExist(err) || fileInfo.Size() == 0
+		isFirstRun := false
+		if err != nil {
+			isFirstRun = os.IsNotExist(err)
+		} else {
+			isFirstRun = fileInfo.Size() == 0
+		}
 
 		if isFirstRun || len(newNotices) > 0 {
 			saveUGreenNotices(newNotices, logFile)

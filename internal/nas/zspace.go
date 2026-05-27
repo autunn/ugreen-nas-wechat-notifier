@@ -64,7 +64,12 @@ func ProcessZSpace() {
 
 		// 3. 处理推送与保存
 		fileInfo, err := os.Stat(logFile)
-		isFirstRun := os.IsNotExist(err) || fileInfo.Size() == 0
+		isFirstRun := false
+		if err != nil {
+			isFirstRun = os.IsNotExist(err)
+		} else {
+			isFirstRun = fileInfo.Size() == 0
+		}
 
 		if isFirstRun {
 			// 首次运行：保存所有数据并推送

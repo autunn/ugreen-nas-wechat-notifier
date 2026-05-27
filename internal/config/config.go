@@ -41,6 +41,40 @@ type AppConfig struct {
 	FnOs   []FnOsConfig   `json:"fnos"`
 }
 
+// MergeWithExistingSensitiveFields 用已有配置补齐前端未回填的敏感字段。
+func MergeWithExistingSensitiveFields(existing, incoming AppConfig) AppConfig {
+	if incoming.CorpSecret == "" {
+		incoming.CorpSecret = existing.CorpSecret
+	}
+	if incoming.Token == "" {
+		incoming.Token = existing.Token
+	}
+	if incoming.EncodingAESKey == "" {
+		incoming.EncodingAESKey = existing.EncodingAESKey
+	}
+
+	if len(incoming.ZSpace) == 1 && len(existing.ZSpace) > 0 {
+		if incoming.ZSpace[0].Cookie == "" {
+			incoming.ZSpace[0].Cookie = existing.ZSpace[0].Cookie
+		}
+	}
+	if len(incoming.UGreen) == 1 && len(existing.UGreen) > 0 {
+		if incoming.UGreen[0].Password == "" {
+			incoming.UGreen[0].Password = existing.UGreen[0].Password
+		}
+	}
+	if len(incoming.FnOs) == 1 && len(existing.FnOs) > 0 {
+		if incoming.FnOs[0].Password == "" {
+			incoming.FnOs[0].Password = existing.FnOs[0].Password
+		}
+		if incoming.FnOs[0].Cookie == "" {
+			incoming.FnOs[0].Cookie = existing.FnOs[0].Cookie
+		}
+	}
+
+	return incoming
+}
+
 type ZSpaceConfig struct {
 	IpPort         string `json:"ip_port"`
 	Cookie         string `json:"cookie"`
@@ -128,6 +162,19 @@ func SanitizedConfigForWeb() AppConfig {
 	snapshot := GetConfigSnapshot()
 	snapshot.AdminPasswordHash = ""
 	snapshot.AdminPassword = ""
+	snapshot.CorpSecret = ""
+	snapshot.Token = ""
+	snapshot.EncodingAESKey = ""
+	for i := range snapshot.ZSpace {
+		snapshot.ZSpace[i].Cookie = ""
+	}
+	for i := range snapshot.UGreen {
+		snapshot.UGreen[i].Password = ""
+	}
+	for i := range snapshot.FnOs {
+		snapshot.FnOs[i].Password = ""
+		snapshot.FnOs[i].Cookie = ""
+	}
 	return snapshot
 }
 

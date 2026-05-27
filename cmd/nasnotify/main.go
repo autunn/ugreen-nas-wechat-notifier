@@ -214,7 +214,7 @@ func main() {
 			}
 
 			oldConfig := config.GetConfigSnapshot()
-			newConfig := req.Config
+			newConfig := config.MergeWithExistingSensitiveFields(oldConfig, req.Config)
 
 			// 保存配置时，默认保留旧密码 hash
 			newConfig.AdminPasswordHash = oldConfig.AdminPasswordHash
