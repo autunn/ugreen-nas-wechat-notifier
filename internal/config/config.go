@@ -13,7 +13,11 @@ import (
 	"time"
 )
 
-const ConfigPath = "config/config.json"
+const (
+	ConfigPath                         = "config/config.json"
+	DefaultIntervalMinutes             = 5
+	DefaultSystemStatusIntervalMinutes = 60
+)
 
 // 全局配置与读写锁
 var (
@@ -29,7 +33,8 @@ type AppConfig struct {
 	// 旧版兼容字段：只用于迁移旧配置，不再保存明文密码
 	AdminPassword string `json:"admin_password,omitempty"`
 
-	IntervalMinutes float64 `json:"interval_minutes"`
+	IntervalMinutes             float64 `json:"interval_minutes"`
+	SystemStatusIntervalMinutes float64 `json:"system_status_interval_minutes"`
 
 	// 企业微信参数
 	CorpID         string `json:"corpid"`
@@ -109,7 +114,8 @@ func InitConfig() {
 	if err != nil {
 		log.Println("未找到 config/config.json，将进入首次初始化模式。")
 		Config = AppConfig{
-			IntervalMinutes: 5,
+			IntervalMinutes:             DefaultIntervalMinutes,
+			SystemStatusIntervalMinutes: DefaultSystemStatusIntervalMinutes,
 		}
 		return
 	}
@@ -211,7 +217,10 @@ func SaveConfig(newConfig AppConfig) error {
 
 func normalizeConfigLocked() {
 	if Config.IntervalMinutes <= 0 {
-		Config.IntervalMinutes = 5
+		Config.IntervalMinutes = DefaultIntervalMinutes
+	}
+	if Config.SystemStatusIntervalMinutes <= 0 {
+		Config.SystemStatusIntervalMinutes = DefaultSystemStatusIntervalMinutes
 	}
 
 	if Config.ZSpace == nil {

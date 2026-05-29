@@ -31,11 +31,12 @@ type ZSpaceResponse struct {
 
 // ProcessZSpace 极空间任务主函数
 func ProcessZSpace() {
-	if len(config.Config.ZSpace) == 0 {
+	devices := config.GetConfigSnapshot().ZSpace
+	if len(devices) == 0 {
 		return
 	}
 
-	for _, cfg := range config.Config.ZSpace {
+	for _, cfg := range devices {
 		ip, port := utils.SplitIpPort(cfg.IpPort, 5055)
 		if !utils.HandleDeviceStatus("极空间", cfg.NotifyTypeName, ip, port) {
 			continue

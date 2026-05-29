@@ -1,12 +1,12 @@
 package nas
 
 import (
+	crand "crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -43,11 +43,12 @@ type FnOsClient struct {
 
 // ProcessFnOs 飞牛任务主函数
 func ProcessFnOs() {
-	if len(config.Config.FnOs) == 0 {
+	devices := config.GetConfigSnapshot().FnOs
+	if len(devices) == 0 {
 		return
 	}
 
-	for _, cfg := range config.Config.FnOs {
+	for _, cfg := range devices {
 		ip, port := utils.SplitIpPort(cfg.Server, 5666)
 		if !utils.HandleDeviceStatus("飞牛", cfg.NotifyTypeName, ip, port) {
 			continue
@@ -296,7 +297,9 @@ func (c *FnOsClient) GetRSAPub() error {
 func (c *FnOsClient) Login(username, password string) error {
 	c.aesKey = generateRandomString(32)
 	c.iv = make([]byte, 16)
-	rand.Read(c.iv)
+	if _, err := crand.Read(c.iv); err != nil {
+		return err
+	}
 
 	resp, err := c.Request("user.login", map[string]interface{}{
 		"user":       username,
@@ -332,8 +335,14 @@ func (c *FnOsClient) Login(username, password string) error {
 func generateRandomString(n int) string {
 	const letters = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	b := make([]byte, n)
+	if _, err := crand.Read(b); err != nil {
+		for i := range b {
+			b[i] = letters[(int(time.Now().UnixNano())+i)%len(letters)]
+		}
+		return string(b)
+	}
 	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
+		b[i] = letters[int(b[i])%len(letters)]
 	}
 	return string(b)
 }

@@ -98,6 +98,14 @@ func pkcs7Unpad(data []byte) []byte {
 		return data
 	}
 	unpadding := int(data[length-1])
+	if unpadding == 0 || unpadding > length {
+		return data
+	}
+	for i := length - unpadding; i < length; i++ {
+		if int(data[i]) != unpadding {
+			return data
+		}
+	}
 	return data[:(length - unpadding)]
 }
 
@@ -115,7 +123,9 @@ func AESGCMEncrypt(keyHex string, plaintext string) (string, error) {
 		return "", err
 	}
 	iv := make([]byte, 12)
-	rand.Read(iv)
+	if _, err := rand.Read(iv); err != nil {
+		return "", err
+	}
 	ct := aesgcm.Seal(nil, iv, []byte(plaintext), nil)
 	return base64.StdEncoding.EncodeToString(append(iv, ct...)), nil
 }

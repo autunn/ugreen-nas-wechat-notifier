@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"nasnotify-go/internal/config"
@@ -17,6 +18,7 @@ import (
 var (
 	wechatAccessToken          string
 	wechatAccessTokenExpiresAt int64
+	wechatAccessTokenMu        sync.Mutex
 )
 
 // ==================== 新增：企业微信 XML 数据结构 ====================
@@ -45,6 +47,9 @@ type WeChatPlainMsg struct {
 
 // getWeChatToken 获取企业微信 Token (支持代理)
 func getWeChatToken(baseURL string) string {
+	wechatAccessTokenMu.Lock()
+	defer wechatAccessTokenMu.Unlock()
+
 	config.CfgMu.RLock()
 	corpID := config.Config.CorpID
 	corpSecret := config.Config.CorpSecret

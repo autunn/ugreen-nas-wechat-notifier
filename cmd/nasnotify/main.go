@@ -61,7 +61,7 @@ func main() {
 	}
 
 	go runTasksLoop()
-	go runHourlyTasksLoop()
+	go runSystemStatusTasksLoop()
 
 	if config.IsInitialized() {
 		go func() {
@@ -390,34 +390,53 @@ func runTasksLoop() {
 	time.Sleep(2 * time.Second)
 
 	for {
-		config.CfgMu.RLock()
-		interval := config.Config.IntervalMinutes
-		config.CfgMu.RUnlock()
-
-		if interval <= 0 {
-			interval = 5
-		}
+		startedAt := time.Now()
 
 		log.Println("--- 开始执行后台通知抓取任务 ---")
 		nas.ProcessZSpace()
 		nas.ProcessUGreen()
 		nas.ProcessFnOs()
 
-		time.Sleep(time.Duration(interval * float64(time.Minute)))
+		waitForConfiguredInterval(startedAt, configuredNotificationIntervalMinutes, config.DefaultIntervalMinutes)
 	}
 }
 
-func runHourlyTasksLoop() {
+func runSystemStatusTasksLoop() {
 	time.Sleep(3 * time.Second)
 
 	for {
-		now := time.Now()
-		nextHour := now.Truncate(time.Hour).Add(time.Hour)
-		waitDuration := time.Until(nextHour)
+		waitForConfiguredInterval(time.Now(), configuredSystemStatusIntervalMinutes, config.DefaultSystemStatusIntervalMinutes)
 
-		time.Sleep(waitDuration)
-
-		log.Println("--- ⏰ 触发整点系统状态推送任务 ---")
+		log.Println("--- ⏰ 触发系统状态定时推送任务 ---")
 		nas.PushUGreenSystemStatus()
 	}
+}
+
+func configuredNotificationIntervalMinutes() float64 {
+	return config.GetConfigSnapshot().IntervalMinutes
+}
+
+func configuredSystemStatusIntervalMinutes() float64 {
+	return config.GetConfigSnapshot().SystemStatusIntervalMinutes
+}
+
+func waitForConfiguredInterval(startedAt time.Time, intervalMinutes func() float64, fallbackMinutes float64) {
+	for {
+		duration := durationFromMinutes(intervalMinutes(), fallbackMinutes)
+		remaining := duration - time.Since(startedAt)
+		if remaining <= 0 {
+			return
+		}
+		if remaining > 30*time.Second {
+			remaining = 30 * time.Second
+		}
+		time.Sleep(remaining)
+	}
+}
+
+func durationFromMinutes(minutes, fallbackMinutes float64) time.Duration {
+	if minutes <= 0 {
+		minutes = fallbackMinutes
+	}
+	return time.Duration(minutes * float64(time.Minute))
 }

@@ -731,7 +731,14 @@
 
             <div class="field">
               <label for="interval_minutes">轮询间隔 (分钟)</label>
-              <input type="number" id="interval_minutes" step="0.1" required>
+              <input type="number" id="interval_minutes" step="0.1" min="0.1" required>
+              <div class="hint">用于抓取各 NAS 系统通知。</div>
+            </div>
+
+            <div class="field">
+              <label for="system_status_interval_minutes">系统状态推送间隔 (分钟)</label>
+              <input type="number" id="system_status_interval_minutes" step="1" min="1" required>
+              <div class="hint">用于绿联系统概览定时推送，默认 60 分钟。</div>
             </div>
           </div>
         </div>
@@ -1053,7 +1060,10 @@
     const rawConfig = {{.configJson}};
 
     function toggleForm(id, show) {
-      document.getElementById(id).classList.toggle('active', show);
+      const form = document.getElementById(id);
+      if (form) {
+        form.classList.toggle('active', show);
+      }
     }
 
     function showError(message) {
@@ -1069,8 +1079,9 @@
       box.classList.remove('show');
     }
 
-    window.onload = function() {
+    function initBaseConfig() {
       document.getElementById('interval_minutes').value = rawConfig.interval_minutes || 5;
+      document.getElementById('system_status_interval_minutes').value = rawConfig.system_status_interval_minutes || 60;
 
       document.getElementById('corpid').value = rawConfig.corpid || '';
       document.getElementById('agentid').value = rawConfig.agentid || '';
@@ -1080,127 +1091,6 @@
       document.getElementById('nas_url').value = rawConfig.nas_url || '';
       document.getElementById('photo_url').value = rawConfig.photo_url || '';
       document.getElementById('proxy_url').value = rawConfig.proxy_url || '';
-
-      if (rawConfig.zspace?.length) {
-        document.getElementById('enable_zspace').checked = true;
-        toggleForm('form_zspace', true);
-
-        document.getElementById('zs_ip').value = rawConfig.zspace[0].ip_port || '';
-        document.getElementById('zs_cookie').value = rawConfig.zspace[0].cookie || '';
-        document.getElementById('zs_name').value = rawConfig.zspace[0].notify_type_name || '';
-        document.getElementById('zs_mac').value = rawConfig.zspace[0].mac_address || '';
-        document.getElementById('zs_ssl').checked = rawConfig.zspace[0].use_ssl;
-      }
-
-      if (rawConfig.ugreen?.length) {
-        document.getElementById('enable_ugreen').checked = true;
-        toggleForm('form_ugreen', true);
-
-        document.getElementById('ug_ip').value = rawConfig.ugreen[0].ip_port || '';
-        document.getElementById('ug_user').value = rawConfig.ugreen[0].username || '';
-        document.getElementById('ug_pass').value = rawConfig.ugreen[0].password || '';
-        document.getElementById('ug_name').value = rawConfig.ugreen[0].notify_type_name || '';
-        document.getElementById('ug_mac').value = rawConfig.ugreen[0].mac_address || '';
-        document.getElementById('ug_ssl').checked = rawConfig.ugreen[0].use_ssl;
-      }
-
-      if (rawConfig.fnos?.length) {
-        document.getElementById('enable_fnos').checked = true;
-        toggleForm('form_fnos', true);
-
-        document.getElementById('fn_ip').value = rawConfig.fnos[0].server || '';
-        document.getElementById('fn_user').value = rawConfig.fnos[0].username || '';
-        document.getElementById('fn_pass').value = rawConfig.fnos[0].password || '';
-        document.getElementById('fn_name').value = rawConfig.fnos[0].notify_type_name || '';
-        document.getElementById('fn_mac').value = rawConfig.fnos[0].mac_address || '';
-        document.getElementById('fn_ssl').checked = rawConfig.fnos[0].use_ssl;
-      }
-    };
-
-    function buildConfig() {
-      return {
-        interval_minutes: parseFloat(document.getElementById('interval_minutes').value) || 5,
-
-        corpid: document.getElementById('corpid').value.trim(),
-        agentid: document.getElementById('agentid').value.trim(),
-        corpsecret: document.getElementById('corpsecret').value,
-        token: document.getElementById('token').value,
-        encoding_aes_key: document.getElementById('encoding_aes_key').value,
-        nas_url: document.getElementById('nas_url').value.trim(),
-        photo_url: document.getElementById('photo_url').value.trim(),
-        proxy_url: document.getElementById('proxy_url').value.trim(),
-
-        zspace: document.getElementById('enable_zspace').checked ? [{
-          ip_port: document.getElementById('zs_ip').value.trim(),
-          cookie: document.getElementById('zs_cookie').value,
-          notify_type_name: document.getElementById('zs_name').value.trim(),
-          mac_address: document.getElementById('zs_mac').value.trim(),
-          use_ssl: document.getElementById('zs_ssl').checked
-        }] : [],
-
-        ugreen: document.getElementById('enable_ugreen').checked ? [{
-          ip_port: document.getElementById('ug_ip').value.trim(),
-          username: document.getElementById('ug_user').value.trim(),
-          password: document.getElementById('ug_pass').value,
-          notify_type_name: document.getElementById('ug_name').value.trim(),
-          mac_address: document.getElementById('ug_mac').value.trim(),
-          use_ssl: document.getElementById('ug_ssl').checked
-        }] : [],
-
-        fnos: document.getElementById('enable_fnos').checked ? [{
-          server: document.getElementById('fn_ip').value.trim(),
-          username: document.getElementById('fn_user').value.trim(),
-          password: document.getElementById('fn_pass').value,
-          notify_type_name: document.getElementById('fn_name').value.trim(),
-          mac_address: document.getElementById('fn_mac').value.trim(),
-          use_ssl: document.getElementById('fn_ssl').checked
-        }] : []
-      };
-    }
-
-    async function saveConfig() {
-      clearError();
-
-      const submitBtn = document.getElementById('saveBtn');
-      const newPassword = document.getElementById('new_admin_password').value;
-
-      if (newPassword && newPassword.length < 8) {
-        showError('新管理员密码至少 8 位。');
-        return;
-      }
-
-      const payload = {
-        new_admin_password: newPassword,
-        config: buildConfig()
-      };
-
-      submitBtn.disabled = true;
-      submitBtn.textContent = '正在保存...';
-
-      try {
-        const res = await fetch('/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (!res.ok) {
-          let msg = '保存失败';
-          try {
-            const data = await res.json();
-            msg = data.error || msg;
-          } catch (_) {}
-          showError(msg);
-          return;
-        }
-
-        window.location.href = '/?success=true';
-      } catch (err) {
-        showError('请求失败，请检查服务是否正常运行。');
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = '保存并应用';
-      }
     }
 
     async function sendTestPush() {
@@ -1454,6 +1344,7 @@
 
       return {
         interval_minutes: parseFloat(document.getElementById('interval_minutes').value) || 5,
+        system_status_interval_minutes: parseFloat(document.getElementById('system_status_interval_minutes').value) || 60,
         corpid: document.getElementById('corpid').value.trim(),
         agentid: document.getElementById('agentid').value.trim(),
         corpsecret: document.getElementById('corpsecret').value,
@@ -1518,7 +1409,10 @@
       }
     }
 
-    document.addEventListener('DOMContentLoaded', initNasEditor);
+    document.addEventListener('DOMContentLoaded', () => {
+      initBaseConfig();
+      initNasEditor();
+    });
   </script>
 </body>
 </html>

@@ -733,7 +733,14 @@
           <div class="grid">
             <div class="field">
               <label for="interval_minutes">轮询间隔，分钟</label>
-              <input type="number" id="interval_minutes" step="0.1" value="5" required>
+              <input type="number" id="interval_minutes" step="0.1" min="0.1" value="5" required>
+              <div class="hint">用于抓取各 NAS 系统通知。</div>
+            </div>
+
+            <div class="field">
+              <label for="system_status_interval_minutes">系统状态推送间隔，分钟</label>
+              <input type="number" id="system_status_interval_minutes" step="1" min="1" value="60" required>
+              <div class="hint">用于绿联系统概览定时推送。</div>
             </div>
           </div>
         </div>
@@ -1062,123 +1069,10 @@
       box.classList.remove('show');
     }
 
-    function bindNasToggles() {
-      const items = [
-        ['enable_zspace', 'form_zspace'],
-        ['enable_ugreen', 'form_ugreen'],
-        ['enable_fnos', 'form_fnos']
-      ];
-
-      items.forEach(([checkboxId, formId]) => {
-        const checkbox = document.getElementById(checkboxId);
-        const form = document.getElementById(formId);
-
-        checkbox.addEventListener('change', () => {
-          form.classList.toggle('active', checkbox.checked);
-        });
-      });
+    function initBaseConfig() {
+      document.getElementById('interval_minutes').value = rawConfig.interval_minutes || 5;
+      document.getElementById('system_status_interval_minutes').value = rawConfig.system_status_interval_minutes || 60;
     }
-
-    function buildConfig() {
-      return {
-        interval_minutes: parseFloat(document.getElementById('interval_minutes').value) || 5,
-
-        corpid: document.getElementById('corpid').value.trim(),
-        agentid: document.getElementById('agentid').value.trim(),
-        corpsecret: document.getElementById('corpsecret').value,
-        token: document.getElementById('token').value.trim(),
-        encoding_aes_key: document.getElementById('encoding_aes_key').value.trim(),
-        nas_url: document.getElementById('nas_url').value.trim(),
-        photo_url: document.getElementById('photo_url').value.trim(),
-        proxy_url: document.getElementById('proxy_url').value.trim(),
-
-        zspace: document.getElementById('enable_zspace').checked ? [{
-          ip_port: document.getElementById('zs_ip').value.trim(),
-          cookie: document.getElementById('zs_cookie').value,
-          notify_type_name: document.getElementById('zs_name').value.trim(),
-          mac_address: document.getElementById('zs_mac').value.trim(),
-          use_ssl: document.getElementById('zs_ssl').checked
-        }] : [],
-
-        ugreen: document.getElementById('enable_ugreen').checked ? [{
-          ip_port: document.getElementById('ug_ip').value.trim(),
-          username: document.getElementById('ug_user').value.trim(),
-          password: document.getElementById('ug_pass').value,
-          notify_type_name: document.getElementById('ug_name').value.trim(),
-          mac_address: document.getElementById('ug_mac').value.trim(),
-          use_ssl: document.getElementById('ug_ssl').checked
-        }] : [],
-
-        fnos: document.getElementById('enable_fnos').checked ? [{
-          server: document.getElementById('fn_ip').value.trim(),
-          username: document.getElementById('fn_user').value.trim(),
-          password: document.getElementById('fn_pass').value,
-          notify_type_name: document.getElementById('fn_name').value.trim(),
-          mac_address: document.getElementById('fn_mac').value.trim(),
-          use_ssl: document.getElementById('fn_ssl').checked
-        }] : []
-      };
-    }
-
-    async function submitSetup() {
-      clearError();
-
-      const submitBtn = document.getElementById('submitBtn');
-      const token = document.getElementById('init_token').value.trim();
-      const password = document.getElementById('admin_password').value;
-      const confirmPassword = document.getElementById('admin_password_confirm').value;
-
-      if (!token) {
-        showError('请输入初始化令牌。');
-        return;
-      }
-
-      if (password.length < 8) {
-        showError('管理员密码至少 8 位。');
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        showError('两次输入的管理员密码不一致。');
-        return;
-      }
-
-      const payload = {
-        init_token: token,
-        admin_password: password,
-        config: buildConfig()
-      };
-
-      submitBtn.disabled = true;
-      submitBtn.textContent = '正在初始化...';
-
-      try {
-        const res = await fetch('/setup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (!res.ok) {
-          let msg = '初始化失败';
-          try {
-            const data = await res.json();
-            msg = data.error || msg;
-          } catch (_) {}
-          showError(msg);
-          return;
-        }
-
-        window.location.href = '/?success=true';
-      } catch (err) {
-        showError('请求失败，请检查服务是否正常运行。');
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = '完成初始化';
-      }
-    }
-
-    document.addEventListener('DOMContentLoaded', bindNasToggles);
 
     const NAS_BRANDS = {
       zspace: {
@@ -1408,6 +1302,7 @@
 
       return {
         interval_minutes: parseFloat(document.getElementById('interval_minutes').value) || 5,
+        system_status_interval_minutes: parseFloat(document.getElementById('system_status_interval_minutes').value) || 60,
         corpid: document.getElementById('corpid').value.trim(),
         agentid: document.getElementById('agentid').value.trim(),
         corpsecret: document.getElementById('corpsecret').value,
@@ -1485,7 +1380,10 @@
       }
     }
 
-    document.addEventListener('DOMContentLoaded', initNasEditor);
+    document.addEventListener('DOMContentLoaded', () => {
+      initBaseConfig();
+      initNasEditor();
+    });
   </script>
 </body>
 </html>

@@ -44,6 +44,22 @@ func TestNormalizeConfigLockedAssignsUniqueIDs(t *testing.T) {
 	}
 }
 
+func TestNormalizeConfigLockedDefaultsIntervals(t *testing.T) {
+	previous := Config
+	defer func() { Config = previous }()
+
+	Config = AppConfig{}
+
+	normalizeConfigLocked()
+
+	if Config.IntervalMinutes != DefaultIntervalMinutes {
+		t.Fatalf("expected notification interval default %v, got %v", DefaultIntervalMinutes, Config.IntervalMinutes)
+	}
+	if Config.SystemStatusIntervalMinutes != DefaultSystemStatusIntervalMinutes {
+		t.Fatalf("expected system status interval default %v, got %v", DefaultSystemStatusIntervalMinutes, Config.SystemStatusIntervalMinutes)
+	}
+}
+
 func TestMergeWithExistingSensitiveFieldsMatchesByID(t *testing.T) {
 	existing := AppConfig{
 		ZSpace: []ZSpaceConfig{

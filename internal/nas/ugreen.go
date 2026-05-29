@@ -785,7 +785,9 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 	}
 
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
 	aesKey := hex.EncodeToString(b)
 
 	urlStr := fmt.Sprintf("%s://%s:%d%s", protocol, ip, port, apiPath)
@@ -795,23 +797,44 @@ func requestUGreenDeepAPI(authInfo *UGreenAuthInfo, ip string, port int, useSSL 
 		for k, v := range params {
 			q.Set(k, v)
 		}
-		encQuery, _ := crypto.AESGCMEncrypt(aesKey, q.Encode())
+		encQuery, err := crypto.AESGCMEncrypt(aesKey, q.Encode())
+		if err != nil {
+			return nil, err
+		}
 		urlStr += "?encrypt_query=" + url.QueryEscape(encQuery)
 	}
 
 	var bodyReader io.Reader
 	if body != nil {
-		bodyJSON, _ := json.Marshal(body)
-		encBody, _ := crypto.AESGCMEncrypt(aesKey, string(bodyJSON))
+		bodyJSON, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		encBody, err := crypto.AESGCMEncrypt(aesKey, string(bodyJSON))
+		if err != nil {
+			return nil, err
+		}
 		encReq := map[string]string{"encrypt_req_body": encBody}
-		encReqJSON, _ := json.Marshal(encReq)
+		encReqJSON, err := json.Marshal(encReq)
+		if err != nil {
+			return nil, err
+		}
 		bodyReader = bytes.NewReader(encReqJSON)
 	}
 
-	req, _ := http.NewRequest(method, urlStr, bodyReader)
+	req, err := http.NewRequest(method, urlStr, bodyReader)
+	if err != nil {
+		return nil, err
+	}
 
-	securityCode, _ := crypto.RsaEncrypt(authInfo.PublicKey, aesKey)
-	ugreenToken, _ := crypto.RsaEncrypt(authInfo.PublicKey, authInfo.Token)
+	securityCode, err := crypto.RsaEncrypt(authInfo.PublicKey, aesKey)
+	if err != nil {
+		return nil, err
+	}
+	ugreenToken, err := crypto.RsaEncrypt(authInfo.PublicKey, authInfo.Token)
+	if err != nil {
+		return nil, err
+	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Client-Id", "cli-go-tool")
