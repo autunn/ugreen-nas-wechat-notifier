@@ -23,10 +23,13 @@ function cleanDir(dir) {
 
 cleanDir(targetDir);
 
-const buildStamp = new Date()
-  .toISOString()
-  .replace(/[-:]/g, "")
-  .replace(/\.\d+Z$/, "Z");
+const configuredBuildStamp = process.env.UGREEN_FRONTEND_BUILD_STAMP?.trim();
+const buildStamp = configuredBuildStamp
+  ? configuredBuildStamp.replace(/[^0-9A-Za-z._-]/g, "-")
+  : new Date()
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace(/\.\d+Z$/, "Z");
 
 const sourceIndexPath = path.join(sourceDir, "index.html");
 const targetSrcDir = path.join(targetDir, "src");

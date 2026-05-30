@@ -42,15 +42,35 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 
 $oldHttpProxy = $env:HTTP_PROXY
 $oldHttpsProxy = $env:HTTPS_PROXY
+$oldFrontendBuildStamp = $env:UGREEN_FRONTEND_BUILD_STAMP
+
+function Invoke-NativeChecked {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$ArgumentList
+    )
+
+    & $FilePath @ArgumentList
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FilePath failed with exit code $LASTEXITCODE"
+    }
+}
 
 try {
     if ($Proxy) {
         $env:HTTP_PROXY = $Proxy
         $env:HTTPS_PROXY = $Proxy
     }
+    $env:UGREEN_FRONTEND_BUILD_STAMP = ($Tag -replace "[^0-9A-Za-z._-]", "-")
 
     Push-Location $repoRoot
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "scripts\build-ugreen-native-app.ps1") -Version $Version
+    if ($LASTEXITCODE -ne 0) {
+        throw "build-ugreen-native-app.ps1 failed"
+    }
     Pop-Location
 
     if (Test-Path -LiteralPath $buildDir) {
@@ -58,10 +78,7 @@ try {
     }
 
     Push-Location $packageRoot
-    & $UgcliPath pack --build $Build
-    if ($LASTEXITCODE -ne 0) {
-        throw "ugcli pack failed"
-    }
+    Invoke-NativeChecked $UgcliPath pack --build $Build
     Pop-Location
 
     $assets = Get-ChildItem -LiteralPath $upkDir -Filter "*.upk" | Sort-Object Name
@@ -86,19 +103,19 @@ Checksums are provided in SHA256SUMS.txt.
 "@
 
     $releaseExists = $false
-    try {
-        & $gh release view $Tag --repo $Repository | Out-Null
+    & $gh release view $Tag --repo $Repository *> $null
+    if ($LASTEXITCODE -eq 0) {
         $releaseExists = $true
-    } catch {
+    } else {
         $releaseExists = $false
     }
 
     $assetPaths = @($assets.FullName) + @($checksumPath)
 
     if ($releaseExists) {
-        & $gh release upload $Tag @assetPaths --repo $Repository --clobber
+        Invoke-NativeChecked $gh release upload $Tag @assetPaths --repo $Repository --clobber
     } else {
-        & $gh release create $Tag @assetPaths --repo $Repository --target main --title $Tag --notes $notes
+        Invoke-NativeChecked $gh release create $Tag @assetPaths --repo $Repository --target main --title $Tag --notes $notes
     }
 
     Write-Host "Release published: https://github.com/$Repository/releases/tag/$Tag"
@@ -114,6 +131,12 @@ finally {
         $env:HTTPS_PROXY = $oldHttpsProxy
     } else {
         Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+    }
+
+    if ($oldFrontendBuildStamp) {
+        $env:UGREEN_FRONTEND_BUILD_STAMP = $oldFrontendBuildStamp
+    } else {
+        Remove-Item Env:UGREEN_FRONTEND_BUILD_STAMP -ErrorAction SilentlyContinue
     }
 
     Set-Location -LiteralPath $startLocation
