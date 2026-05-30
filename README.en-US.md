@@ -69,6 +69,16 @@ packaging/ugreen-native-app/build_dir/pkgs/upk/
 5. Send the binding code shown in the app to finish binding.
 6. After binding, send fixed WeChat commands to query or control the NAS.
 
+## Release
+
+UPK files are distributed through GitHub Releases. To publish a new release locally, install the official UGREEN `ugcli` tool and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\publish-release.ps1 -Tag v1.0.0.0016 -Build 16
+```
+
+The script rebuilds frontend and backend assets, runs `ugcli pack` for amd64/arm64 UPK files, writes SHA256 checksums, and uploads the assets to GitHub Releases.
+
 ## Notes
 
 - The NAS must be able to access external HTTPS networks, otherwise WeChat QR login and message sync may fail.

@@ -60,6 +60,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-ugreen-native-app.ps1 -
 packaging/ugreen-native-app/build_dir/pkgs/upk/
 ```
 
+## 发布 Release
+
+本仓库的 UPK 通过 GitHub Releases 分发。发布新版本时，在本地安装绿联官方 `ugcli` 后运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\publish-release.ps1 -Tag v1.0.0.0016 -Build 16
+```
+
+脚本会重新构建前端和后端，调用 `ugcli pack` 生成 amd64/arm64 UPK，计算 SHA256，并上传到 GitHub Releases。
+
 ## 使用说明
 
 1. 在绿联 NAS 中安装构建得到的 UPK。
