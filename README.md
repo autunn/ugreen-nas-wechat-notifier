@@ -1,57 +1,80 @@
-# UGREEN NAS WeChat Notifier
+# 绿联 NAS 微信通知助手
 
-UGREEN NAS native app for WeChat-based notifications and remote status commands.
+[English](README.en-US.md) | 中文
 
-This project targets a single local UGREEN NAS. It packages a Go backend, an embedded web UI, and a WeChat gateway into a UGREEN native app.
+这是一个面向绿联 NAS 的原生应用，用于通过微信完成 NAS 通知推送、状态查询和部分固定指令控制。
 
-## Features
+项目当前只面向单台本地绿联 NAS，不做多设备管理，不依赖企业微信、PushPlus 或公网回调服务。应用内置 Go 后端、前端页面和微信网关，并通过绿联原生应用格式进行打包。
 
-- UGREEN native app frontend and Go backend
-- Single local UGREEN NAS integration
-- Embedded WeChat login, binding, menu, and command handling
-- WeChat replies for system status, storage, Docker, processes, backup, power, UPS, fan, and CPU control
-- UGREEN UPK packaging scripts for amd64 and arm64
+## 功能特性
 
-## Project Layout
+- 绿联 NAS 原生应用前端和 Go 后端
+- 单台本地绿联 NAS 数据获取和控制
+- 内置微信扫码登录、绑定、菜单和消息指令处理
+- 支持系统状态、存储、Docker、进程、备份、电源、UPS、风扇和 CPU 模式等微信回复
+- 支持 amd64 和 arm64 的绿联 UPK 打包流程
 
-- `cmd/nasnotify`: backend service and HTTP API
-- `frontend/ugreen-app`: UGREEN app frontend source
-- `internal/nas`: UGREEN NAS API integration and WeChat reply formatting
-- `internal/notify`: WeChat binding, menu, and command push helpers
-- `internal/wechatgateway`: embedded WeChat login/session/message gateway
-- `packaging/ugreen-native-app`: UGREEN app manifest and rootfs assets
-- `scripts`: frontend sync and native app build scripts
+## 微信指令
 
-## WeChat Commands
+- `菜单`: 查看支持的指令
+- `状态`: 查看 NAS 系统状态
+- `通知`: 发送测试通知
+- `存储`: 查看存储使用情况
+- `Docker`: 查看 Docker 状态
+- `进程`: 查看进程摘要
+- `备份`: 查看备份状态
+- `电源`: 查看电源相关信息
+- `UPS`: 查看 UPS 状态
+- `测试`: 发送测试回复
+- `风扇1` / `风扇2` / `风扇3`: 切换风扇模式
+- `CPU0` / `CPU1` / `CPU2`: 切换 CPU 模式
 
-- `菜单`: show supported commands
-- `状态`: show NAS system status
-- `通知`: send a test notification
-- `存储`: show storage usage
-- `Docker`: show Docker status
-- `进程`: show process summary
-- `备份`: show backup status
-- `电源`: show power controls
-- `UPS`: show UPS status
-- `测试`: send a test reply
-- `风扇1` / `风扇2` / `风扇3`: switch fan mode
-- `CPU0` / `CPU1` / `CPU2`: switch CPU mode
+## 项目结构
 
-## Build
+- `cmd/nasnotify`: 后端服务和 HTTP API
+- `frontend/ugreen-app`: 绿联应用前端源码
+- `internal/nas`: 绿联 NAS API 集成和微信回复格式化
+- `internal/notify`: 微信绑定、菜单和指令回复逻辑
+- `internal/wechatgateway`: 内置微信登录、会话和消息网关
+- `packaging/ugreen-native-app`: 绿联应用清单和 rootfs 资源
+- `scripts`: 前端同步和绿联原生应用构建脚本
 
-Run Go checks:
+## 构建
+
+运行 Go 检查：
 
 ```powershell
 go test ./...
 go vet ./...
 ```
 
-Build UGREEN app artifacts:
+构建绿联应用产物：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-ugreen-native-app.ps1 -Version v2026.05.30
 ```
 
-## License
+构建完成后，UPK 文件会生成在：
 
-This project is released under the MIT License. See [LICENSE](LICENSE).
+```text
+packaging/ugreen-native-app/build_dir/pkgs/upk/
+```
+
+## 使用说明
+
+1. 在绿联 NAS 中安装构建得到的 UPK。
+2. 打开应用并完成初始化设置。
+3. 在微信网关页面生成二维码并扫码登录。
+4. 在微信端发送任意消息激活会话。
+5. 发送页面提示的绑定码完成绑定。
+6. 绑定完成后，即可通过微信发送固定指令查询或控制 NAS。
+
+## 注意事项
+
+- NAS 需要能访问外部 HTTPS 网络，否则微信登录二维码和消息收发可能失败。
+- 当前项目只针对单台本地绿联 NAS，不支持多设备选择。
+- 本项目仍在实测迭代中，建议先在测试环境验证后再长期使用。
+
+## 开源协议
+
+本项目基于 MIT License 开源，详见 [LICENSE](LICENSE)。
