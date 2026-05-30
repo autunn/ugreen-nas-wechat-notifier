@@ -103,11 +103,16 @@ Checksums are provided in SHA256SUMS.txt.
 "@
 
     $releaseExists = $false
-    & $gh release view $Tag --repo $Repository *> $null
-    if ($LASTEXITCODE -eq 0) {
-        $releaseExists = $true
-    } else {
-        $releaseExists = $false
+    $oldNativeCommandUseErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & $gh release view $Tag --repo $Repository *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $releaseExists = $true
+        }
+    }
+    finally {
+        $ErrorActionPreference = $oldNativeCommandUseErrorActionPreference
     }
 
     $assetPaths = @($assets.FullName) + @($checksumPath)
