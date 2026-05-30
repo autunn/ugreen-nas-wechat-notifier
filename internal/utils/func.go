@@ -1,12 +1,11 @@
 package utils
 
 import (
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -62,9 +61,13 @@ func SplitIpPort(address string, defaultPort int) (string, int) {
 }
 
 func DeviceLogFile(deviceType, deviceID, host string, port int) string {
+	logDir := strings.TrimSpace(os.Getenv("UGAPP_LOG_DIR"))
+	if logDir == "" {
+		logDir = filepath.Join("data", "log")
+	}
+
 	return filepath.Join(
-		"data",
-		"log",
+		logDir,
 		fmt.Sprintf("%s_%s_%s_%d.log",
 			sanitizeLogComponent(deviceType),
 			sanitizeLogComponent(deviceID),
@@ -147,73 +150,4 @@ func HandleDeviceStatus(deviceType, deviceName, ip string, port int) bool {
 	}
 
 	return false
-}
-
-// WakeOnLAN 发送 UDP 魔术包唤醒局域网设备 (散弹枪模式：全局广播 + 定向广播 + 单播穿透)
-func WakeOnLAN(macAddr string, deviceIpPort string) error {
-	if macAddr == "" {
-		return errors.New("MAC地址为空")
-	}
-	macStr := strings.ReplaceAll(macAddr, ":", "")
-	macStr = strings.ReplaceAll(macStr, "-", "")
-	if len(macStr) != 12 {
-		return errors.New("无效的MAC地址格式")
-	}
-
-	macBytes, err := hex.DecodeString(macStr)
-	if err != nil {
-		return err
-	}
-
-	var packet []byte
-	// 6 字节的 0xFF
-	for i := 0; i < 6; i++ {
-		packet = append(packet, 0xFF)
-	}
-	// 16 次 MAC 地址
-	for i := 0; i < 16; i++ {
-		packet = append(packet, macBytes...)
-	}
-
-	ip, _ := SplitIpPort(deviceIpPort, 0)
-	parsedIP := net.ParseIP(ip)
-
-	// 目标地址池
-	var targets []string
-	targets = append(targets, "255.255.255.255:9") // 1. 全局广播 (兜底)
-
-	if parsedIP != nil && parsedIP.To4() != nil {
-		ipv4 := parsedIP.To4()
-		// 2. 定向广播 (例如 192.168.1.255)
-		directedBroadcast := fmt.Sprintf("%d.%d.%d.255:9", ipv4[0], ipv4[1], ipv4[2])
-		targets = append(targets, directedBroadcast)
-
-		// 3. 单播穿透 (例如 192.168.1.9) - 专治 Mac Docker 网络隔离
-		unicastTarget := fmt.Sprintf("%s:9", ip)
-		targets = append(targets, unicastTarget)
-	}
-
-	// 循环向所有可能的地址轰炸唤醒包
-	var lastErr error
-	successCount := 0
-	for _, target := range targets {
-		conn, err := net.DialTimeout("udp", target, 2*time.Second)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		_, err = conn.Write(packet)
-		conn.Close()
-		if err == nil {
-			successCount++
-		} else {
-			lastErr = err
-		}
-	}
-
-	if successCount == 0 && lastErr != nil {
-		return fmt.Errorf("所有穿透策略均失败: %v", lastErr)
-	}
-
-	return nil
 }

@@ -1,14 +1,11 @@
 package crypto
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -16,7 +13,8 @@ import (
 	"errors"
 )
 
-// RsaEncrypt 使用公钥进行 RSA PKCS1v1.5 加密，返回 Base64 字符串
+// RsaEncrypt uses RSA PKCS#1 v1.5 only because the UGREEN local API expects it.
+// New protocols should prefer RSA-OAEP as recommended by Go's crypto/rsa docs.
 func RsaEncrypt(pubKeyPem string, plaintext string) (string, error) {
 	block, _ := pem.Decode([]byte(pubKeyPem))
 	if block == nil {
@@ -36,80 +34,6 @@ func RsaEncrypt(pubKeyPem string, plaintext string) (string, error) {
 	}
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
-
-// ==================== 以下为飞牛 (fnos) 所需的算法 ====================
-
-// AesEncrypt AES-CBC 加密
-func AesEncrypt(data string, key string, iv []byte) (string, error) {
-	block, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		return "", err
-	}
-	paddedData := pkcs7Pad([]byte(data), aes.BlockSize)
-	ciphertext := make([]byte, len(paddedData))
-	mode := cipher.NewCBCEncrypter(block, iv)
-	mode.CryptBlocks(ciphertext, paddedData)
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
-}
-
-// AesDecrypt AES-CBC 解密
-func AesDecrypt(cipherBase64 string, key string, iv []byte) (string, error) {
-	ciphertext, err := base64.StdEncoding.DecodeString(cipherBase64)
-	if err != nil {
-		return "", err
-	}
-	block, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		return "", err
-	}
-	if len(ciphertext)%aes.BlockSize != 0 {
-		return "", errors.New("密文长度不是块大小的整数倍")
-	}
-	plaintext := make([]byte, len(ciphertext))
-	mode := cipher.NewCBCDecrypter(block, iv)
-	mode.CryptBlocks(plaintext, ciphertext)
-
-	unpaddedData := pkcs7Unpad(plaintext)
-	return base64.StdEncoding.EncodeToString(unpaddedData), nil
-}
-
-// GetSignature HMAC-SHA256 签名
-func GetSignature(data string, keyBase64 string) (string, error) {
-	keyBytes, err := base64.StdEncoding.DecodeString(keyBase64)
-	if err != nil {
-		return "", err
-	}
-	mac := hmac.New(sha256.New, keyBytes)
-	mac.Write([]byte(data))
-	return base64.StdEncoding.EncodeToString(mac.Sum(nil)), nil
-}
-
-// pkcs7Pad 补码
-func pkcs7Pad(data []byte, blockSize int) []byte {
-	padding := blockSize - len(data)%blockSize
-	padText := bytes.Repeat([]byte{byte(padding)}, padding)
-	return append(data, padText...)
-}
-
-// pkcs7Unpad 去码
-func pkcs7Unpad(data []byte) []byte {
-	length := len(data)
-	if length == 0 {
-		return data
-	}
-	unpadding := int(data[length-1])
-	if unpadding == 0 || unpadding > length {
-		return data
-	}
-	for i := length - unpadding; i < length; i++ {
-		if int(data[i]) != unpadding {
-			return data
-		}
-	}
-	return data[:(length - unpadding)]
-}
-
-// ==================== 以下为绿联 (ugreen) 深层 API 所需的算法 ====================
 
 // AESGCMEncrypt AES-256-GCM 加密
 func AESGCMEncrypt(keyHex string, plaintext string) (string, error) {

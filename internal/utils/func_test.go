@@ -1,6 +1,10 @@
 package utils
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestSplitIpPortSupportsHostnames(t *testing.T) {
 	tests := []struct {
@@ -51,11 +55,19 @@ func TestSplitIpPortSupportsHostnames(t *testing.T) {
 }
 
 func TestDeviceLogFileUsesDeviceIdentity(t *testing.T) {
-	got := DeviceLogFile("绿联", "device-01", "maomao.autunn.top", 443)
+	got := DeviceLogFile("ugreen", "device-01", "maomao.autunn.top", 443)
 	if got == "" {
 		t.Fatal("expected log file path")
 	}
-	if got == DeviceLogFile("绿联", "device-02", "maomao.autunn.top", 443) {
+	if got == DeviceLogFile("ugreen", "device-02", "maomao.autunn.top", 443) {
 		t.Fatal("expected different devices to produce different log files")
+	}
+}
+
+func TestDeviceLogFileUsesUGAppLogDirWhenAvailable(t *testing.T) {
+	t.Setenv("UGAPP_LOG_DIR", filepath.Join("runtime", "log"))
+	got := DeviceLogFile("ugreen", "device-01", "nas.example.com", 9999)
+	if !strings.Contains(got, filepath.Join("runtime", "log")) {
+		t.Fatalf("expected log path to use UGAPP_LOG_DIR, got %q", got)
 	}
 }

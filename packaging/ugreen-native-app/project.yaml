@@ -1,0 +1,29 @@
+spec_version: "2.1"
+app_id: com.autunn.nasnotifyfresh
+version: 1.0.0
+support_arch:
+  - amd64
+  - arm64
+start_cmd: "bin/nasnotify"
+port: 5080
+proxy_path: "nasnotify"
+open_type: inner
+allow_add_access_path: false
+tag_types:
+  - utility
+depend_fw_version: 1.13.0.0000
+permissions:
+  - NETWORK.ACCESS_INTERNET
+i18n:
+  en-US:
+    name: NasNotify
+    description: Local WeChat notification service for UGREEN NAS. Receive system alerts and send commands via WeChat.
+    author: Autunn
+    official: https://github.com/autunn/nasnotify_go
+    help: https://github.com/autunn/nasnotify_go
+  zh-CN:
+    name: NasNotify
+    description: 绿联 NAS 本地微信通知服务。通过微信接收系统告警，并使用固定指令查询 NAS 状态。
+    author: Autunn
+    official: https://github.com/autunn/nasnotify_go
+    help: https://github.com/autunn/nasnotify_go

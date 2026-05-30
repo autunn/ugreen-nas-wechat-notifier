@@ -1,0 +1,11 @@
+# Generated binaries
+/rootfs_amd64/bin/nasnotify
+/rootfs_arm64/bin/nasnotify
+
+# Packaging outputs
+/build/
+/build_dir/
+*.ugb
+*.upk
+*.tar.gz
+*.zip

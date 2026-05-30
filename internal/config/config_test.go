@@ -1,50 +1,11 @@
 package config
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
-func TestNormalizeConfigLockedAssignsUniqueIDs(t *testing.T) {
-	previous := Config
-	defer func() { Config = previous }()
-
-	Config = AppConfig{
-		ZSpace: []ZSpaceConfig{{}, {ID: "dup"}},
-		UGreen: []UGreenConfig{{ID: "dup"}},
-		FnOs:   []FnOsConfig{{}},
-	}
-
-	normalizeConfigLocked()
-
-	ids := map[string]struct{}{}
-	for _, item := range Config.ZSpace {
-		if item.ID == "" {
-			t.Fatalf("expected zspace id to be populated")
-		}
-		if _, ok := ids[item.ID]; ok {
-			t.Fatalf("duplicate id generated: %s", item.ID)
-		}
-		ids[item.ID] = struct{}{}
-	}
-	for _, item := range Config.UGreen {
-		if item.ID == "" {
-			t.Fatalf("expected ugreen id to be populated")
-		}
-		if _, ok := ids[item.ID]; ok {
-			t.Fatalf("duplicate id generated: %s", item.ID)
-		}
-		ids[item.ID] = struct{}{}
-	}
-	for _, item := range Config.FnOs {
-		if item.ID == "" {
-			t.Fatalf("expected fnos id to be populated")
-		}
-		if _, ok := ids[item.ID]; ok {
-			t.Fatalf("duplicate id generated: %s", item.ID)
-		}
-		ids[item.ID] = struct{}{}
-	}
-}
-
-func TestNormalizeConfigLockedDefaultsIntervals(t *testing.T) {
+func TestNormalizeConfigLockedDefaults(t *testing.T) {
 	previous := Config
 	defer func() { Config = previous }()
 
@@ -58,85 +19,83 @@ func TestNormalizeConfigLockedDefaultsIntervals(t *testing.T) {
 	if Config.SystemStatusIntervalMinutes != DefaultSystemStatusIntervalMinutes {
 		t.Fatalf("expected system status interval default %v, got %v", DefaultSystemStatusIntervalMinutes, Config.SystemStatusIntervalMinutes)
 	}
+	if Config.LocalNasPort != 9999 {
+		t.Fatalf("expected local nas port default 9999, got %d", Config.LocalNasPort)
+	}
+	if Config.LocalNasName != "本机绿联 NAS" {
+		t.Fatalf("expected local nas name default, got %q", Config.LocalNasName)
+	}
+	if Config.WechatGatewayURL != DefaultWechatGatewayURL {
+		t.Fatalf("expected gateway url default %q, got %q", DefaultWechatGatewayURL, Config.WechatGatewayURL)
+	}
 }
 
-func TestMergeWithExistingSensitiveFieldsMatchesByID(t *testing.T) {
+func TestMergeWithExistingSensitiveFields(t *testing.T) {
 	existing := AppConfig{
-		ZSpace: []ZSpaceConfig{
-			{ID: "zs-1", Cookie: "cookie-1"},
-			{ID: "zs-2", Cookie: "cookie-2"},
-		},
-		UGreen: []UGreenConfig{
-			{ID: "ug-1", Password: "pass-1"},
-		},
-		FnOs: []FnOsConfig{
-			{ID: "fn-1", Password: "pass-1", Cookie: "cookie-1"},
-		},
+		WechatGatewaySecret: "gateway-secret",
+		WechatBindingCode:   "ABC123",
+		WechatBound:         true,
+		WechatBoundAt:       "2026-05-30",
+		LocalNasPassword:    "nas-password",
 	}
-
-	incoming := AppConfig{
-		ZSpace: []ZSpaceConfig{
-			{ID: "zs-2"},
-			{ID: "zs-1", Cookie: "new-cookie"},
-		},
-		UGreen: []UGreenConfig{
-			{ID: "ug-1"},
-		},
-		FnOs: []FnOsConfig{
-			{ID: "fn-1"},
-		},
-	}
+	incoming := AppConfig{}
 
 	merged := MergeWithExistingSensitiveFields(existing, incoming)
 
-	if got := merged.ZSpace[0].Cookie; got != "cookie-2" {
-		t.Fatalf("expected zspace cookie to be preserved by id, got %q", got)
+	if got := merged.WechatGatewaySecret; got != "gateway-secret" {
+		t.Fatalf("expected gateway secret to be preserved, got %q", got)
 	}
-	if got := merged.ZSpace[1].Cookie; got != "new-cookie" {
-		t.Fatalf("expected explicit zspace cookie to win, got %q", got)
+	if got := merged.WechatBindingCode; got != "ABC123" {
+		t.Fatalf("expected binding code to be preserved, got %q", got)
 	}
-	if got := merged.UGreen[0].Password; got != "pass-1" {
-		t.Fatalf("expected ugreen password to be preserved by id, got %q", got)
+	if !merged.WechatBound {
+		t.Fatalf("expected bound flag to be preserved")
 	}
-	if got := merged.FnOs[0].Password; got != "pass-1" {
-		t.Fatalf("expected fnos password to be preserved by id, got %q", got)
+	if got := merged.WechatBoundAt; got != "2026-05-30" {
+		t.Fatalf("expected bound time to be preserved, got %q", got)
 	}
-	if got := merged.FnOs[0].Cookie; got != "cookie-1" {
-		t.Fatalf("expected fnos cookie to be preserved by id, got %q", got)
+	if got := merged.LocalNasPassword; got != "nas-password" {
+		t.Fatalf("expected NAS password to be preserved, got %q", got)
 	}
 }
 
-func TestSanitizedConfigForWebKeepsIDs(t *testing.T) {
+func TestSanitizedConfigForWebClearsSecrets(t *testing.T) {
 	previous := Config
 	defer func() { Config = previous }()
 
 	Config = AppConfig{
-		ZSpace: []ZSpaceConfig{{ID: "zs-1", Cookie: "cookie-1"}},
-		UGreen: []UGreenConfig{{ID: "ug-1", Password: "pass-1"}},
-		FnOs:   []FnOsConfig{{ID: "fn-1", Password: "pass-1", Cookie: "cookie-1"}},
+		AdminPasswordHash:   "hash",
+		AdminPassword:       "plain",
+		WechatGatewaySecret: "gateway-secret",
+		WechatBindingCode:   "ABC123",
+		WechatBound:         true,
+		LocalNasPassword:    "nas-password",
 	}
 
 	sanitized := SanitizedConfigForWeb()
 
-	if got := sanitized.ZSpace[0].ID; got != "zs-1" {
-		t.Fatalf("expected zspace id to remain visible, got %q", got)
+	if sanitized.AdminPasswordHash != "" || sanitized.AdminPassword != "" {
+		t.Fatalf("expected admin password fields to be cleared")
 	}
-	if got := sanitized.ZSpace[0].Cookie; got != "" {
-		t.Fatalf("expected zspace cookie to be cleared, got %q", got)
+	if got := sanitized.WechatGatewaySecret; got != "" {
+		t.Fatalf("expected gateway secret to be cleared, got %q", got)
 	}
-	if got := sanitized.UGreen[0].ID; got != "ug-1" {
-		t.Fatalf("expected ugreen id to remain visible, got %q", got)
+	if got := sanitized.LocalNasPassword; got != "" {
+		t.Fatalf("expected NAS password to be cleared, got %q", got)
 	}
-	if got := sanitized.UGreen[0].Password; got != "" {
-		t.Fatalf("expected ugreen password to be cleared, got %q", got)
+	if got := sanitized.WechatBindingCode; got != "ABC123" {
+		t.Fatalf("expected binding code to remain visible, got %q", got)
 	}
-	if got := sanitized.FnOs[0].ID; got != "fn-1" {
-		t.Fatalf("expected fnos id to remain visible, got %q", got)
+	if !sanitized.WechatBound {
+		t.Fatalf("expected bound flag to remain visible")
 	}
-	if got := sanitized.FnOs[0].Password; got != "" {
-		t.Fatalf("expected fnos password to be cleared, got %q", got)
-	}
-	if got := sanitized.FnOs[0].Cookie; got != "" {
-		t.Fatalf("expected fnos cookie to be cleared, got %q", got)
+}
+
+func TestConfigPathUsesUGAppDataDirWhenAvailable(t *testing.T) {
+	t.Setenv("UGAPP_DATA_DIR", filepath.Join("runtime", "data"))
+	got := configPath()
+	want := filepath.Join("runtime", "data", "config", "config.json")
+	if got != want {
+		t.Fatalf("configPath() = %q; want %q", got, want)
 	}
 }
